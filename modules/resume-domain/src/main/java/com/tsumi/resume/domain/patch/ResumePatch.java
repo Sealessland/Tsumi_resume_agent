@@ -27,4 +27,31 @@ public record ResumePatch(
         newAtomicClaims = List.copyOf(newAtomicClaims);
         riskFlags = List.copyOf(riskFlags);
     }
+
+    public ResumePatch reviewedAs(ReviewStatus decision) {
+        if (reviewStatus != ReviewStatus.PENDING) {
+            throw new IllegalStateException("Patch review is already final: " + reviewStatus);
+        }
+        if (decision == ReviewStatus.PENDING) {
+            throw new IllegalArgumentException("Review decision cannot remain pending");
+        }
+        return new ResumePatch(
+                patchId,
+                taskId,
+                resumeId,
+                baseVersion,
+                op,
+                path,
+                before,
+                after,
+                intent,
+                evidenceRefs,
+                jdRefs,
+                evidenceCoverage,
+                newAtomicClaims,
+                confidence,
+                riskFlags,
+                policyDecision,
+                decision);
+    }
 }
