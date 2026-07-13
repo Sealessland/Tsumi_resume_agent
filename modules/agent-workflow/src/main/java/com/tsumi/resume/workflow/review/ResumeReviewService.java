@@ -5,7 +5,6 @@ import com.tsumi.resume.domain.merge.ResumePatchEngine;
 import com.tsumi.resume.domain.merge.VersionConflictException;
 import com.tsumi.resume.domain.patch.ResumePatch;
 import com.tsumi.resume.domain.patch.ReviewStatus;
-import com.tsumi.resume.domain.policy.PatchAssessment;
 import com.tsumi.resume.domain.policy.PatchPolicy;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.domain.policy.PolicyEvaluation;
@@ -13,6 +12,9 @@ import com.tsumi.resume.task.ResumeTask;
 import com.tsumi.resume.task.TaskNotFoundException;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
+import com.tsumi.resume.workflow.UnitOfWork;
+import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
+import com.tsumi.resume.workflow.evidence.EvidenceGuard;
 import java.time.Clock;
 import java.util.List;
 
@@ -22,6 +24,9 @@ public final class ResumeReviewService {
     private final PatchStore patchStore;
     private final VersionedResumeService resumeService;
     private final Clock clock;
+    private final EvidenceArtifactStore evidenceStore;
+    private final EvidenceGuard evidenceGuard;
+    private final UnitOfWork unitOfWork;
     private final PatchPolicy patchPolicy = new PatchPolicy();
     private final ResumePatchEngine patchEngine = new ResumePatchEngine();
 
@@ -29,21 +34,38 @@ public final class ResumeReviewService {
             TaskRepository taskRepository,
             PatchStore patchStore,
             VersionedResumeService resumeService,
-            Clock clock) {
+            Clock clock,
+            EvidenceArtifactStore evidenceStore,
+            EvidenceGuard evidenceGuard) {
+        this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard, UnitOfWork.direct());
+    }
+
+    public ResumeReviewService(
+            TaskRepository taskRepository,
+            PatchStore patchStore,
+            VersionedResumeService resumeService,
+            Clock clock,
+            EvidenceArtifactStore evidenceStore,
+            EvidenceGuard evidenceGuard,
+            UnitOfWork unitOfWork) {
         this.taskRepository = taskRepository;
         this.patchStore = patchStore;
         this.resumeService = resumeService;
         this.clock = clock;
+        this.evidenceStore = evidenceStore;
+        this.evidenceGuard = evidenceGuard;
+        this.unitOfWork = unitOfWork;
     }
 
-    public PolicyEvaluation submit(
-            String taskId, PatchProposal proposal, PatchAssessment assessment) {
+    public PolicyEvaluation submit(String taskId, PatchProposal proposal) {
         var task = task(taskId);
         requireProposalTarget(task, taskId, proposal);
         if (patchStore.find(taskId, proposal.patchId()).isPresent()) {
             throw new DuplicatePatchException(taskId, proposal.patchId());
         }
 
+        var assessment = evidenceGuard.assess(
+                task, proposal, evidenceStore.findByTaskId(taskId));
         var evaluation = patchPolicy.evaluate(proposal, assessment);
         evaluation.patch().ifPresent(patchStore::save);
         return evaluation;
@@ -70,6 +92,10 @@ public final class ResumeReviewService {
     }
 
     public ObjectNode merge(String taskId, long expectedBaseVersion) {
+        return unitOfWork.execute(() -> mergeAtomically(taskId, expectedBaseVersion));
+    }
+
+    private ObjectNode mergeAtomically(String taskId, long expectedBaseVersion) {
         var task = task(taskId);
         requireExpectedVersion(task, expectedBaseVersion);
         var accepted = patchStore.findByTaskId(taskId).stream()
@@ -77,6 +103,19 @@ public final class ResumeReviewService {
                 .toList();
         if (accepted.isEmpty()) {
             throw new NoAcceptedPatchesException(taskId);
+        }
+
+        for (var patch : accepted) {
+            var proposal = new PatchProposal(
+                    patch.patchId(), patch.taskId(), patch.resumeId(), patch.baseVersion(),
+                    patch.op(), patch.path(), patch.before(), patch.after(), patch.intent(),
+                    patch.evidenceRefs(), patch.jdRefs(), patch.confidence());
+            var assessment = evidenceGuard.assess(
+                    task, proposal, evidenceStore.findByTaskId(taskId));
+            if (patchPolicy.evaluate(proposal, assessment).decision()
+                    != com.tsumi.resume.domain.patch.PolicyDecision.ALLOW) {
+                throw new ReviewConflictException("Accepted patch no longer passes Evidence Policy");
+            }
         }
 
         var base = resumeService.get(task.resumeId(), expectedBaseVersion);

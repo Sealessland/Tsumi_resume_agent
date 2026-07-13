@@ -5,6 +5,9 @@ import com.tsumi.resume.infrastructure.resume.InMemoryResumeVersionStore;
 import com.tsumi.resume.infrastructure.review.InMemoryPatchStore;
 import com.tsumi.resume.infrastructure.task.InMemoryTaskRepository;
 import com.tsumi.resume.infrastructure.workflow.LocalDeterministicWorkflow;
+import com.tsumi.resume.infrastructure.evidence.InMemoryEvidenceArtifactStore;
+import com.tsumi.resume.domain.evidence.ClaimAssessment;
+import com.tsumi.resume.domain.evidence.ClaimVerdict;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.workflow.ResumeAgentWorkflow;
 import com.tsumi.resume.workflow.TaskOrchestrator;
@@ -13,8 +16,13 @@ import com.tsumi.resume.workflow.resume.ResumeVersionReader;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
 import com.tsumi.resume.workflow.review.PatchStore;
 import com.tsumi.resume.workflow.review.ResumeReviewService;
+import com.tsumi.resume.workflow.evidence.ClaimSupportEvaluator;
+import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
+import com.tsumi.resume.workflow.evidence.EvidenceGuard;
+import com.tsumi.resume.workflow.evidence.ServerEvidenceGuard;
 import java.io.IOException;
 import java.time.Clock;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.context.annotation.Bean;
@@ -54,12 +62,39 @@ public class LocalRuntimeConfiguration {
     }
 
     @Bean
+    EvidenceArtifactStore evidenceArtifactStore() {
+        return new InMemoryEvidenceArtifactStore();
+    }
+
+    @Bean
+    ClaimSupportEvaluator claimSupportEvaluator() {
+        return (before, after, evidence) -> List.of(new ClaimAssessment(
+                after,
+                evidence.isEmpty() ? ClaimVerdict.AMBIGUOUS : ClaimVerdict.SUPPORTED,
+                evidence.stream().map(artifact -> artifact.artifactId()).toList(),
+                evidence.isEmpty()
+                        ? "No approved Evidence is available"
+                        : "Deterministic local recording accepted the evidence-backed paraphrase"));
+    }
+
+    @Bean
+    EvidenceGuard evidenceGuard(
+            ResumeVersionReader resumes,
+            ClaimSupportEvaluator evaluator,
+            Clock clock) {
+        return new ServerEvidenceGuard(resumes, evaluator, clock);
+    }
+
+    @Bean
     ResumeReviewService resumeReviewService(
             TaskRepository taskRepository,
             PatchStore patchStore,
             VersionedResumeService resumeService,
-            Clock clock) {
-        return new ResumeReviewService(taskRepository, patchStore, resumeService, clock);
+            Clock clock,
+            EvidenceArtifactStore evidenceStore,
+            EvidenceGuard evidenceGuard) {
+        return new ResumeReviewService(
+                taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard);
     }
 
     @Bean("resumeContractValidator")

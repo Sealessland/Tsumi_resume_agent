@@ -18,6 +18,8 @@ import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.task.TaskStatus;
 import com.tsumi.resume.workflow.resume.ResumeVersionStore;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
+import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
+import com.tsumi.resume.domain.evidence.EvidenceArtifact;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -37,6 +39,7 @@ class ResumeReviewServiceTest {
     private final MemoryResumeStore resumeStore = new MemoryResumeStore();
     private final MemoryPatchStore patchStore = new MemoryPatchStore();
     private final MemoryTaskRepository taskRepository = new MemoryTaskRepository();
+    private PatchAssessment guardAssessment;
     private ResumeReviewService service;
 
     @BeforeEach
@@ -50,20 +53,21 @@ class ResumeReviewServiceTest {
                 .reviewReady("ready", now));
         resumeStore.save((ObjectNode) objectMapper.readTree(
                 contracts.resolve("fixtures/resume/valid-minimal-v13.json").toFile()));
+        guardAssessment = new PatchAssessment(1.0, List.of(), List.of());
         service = new ResumeReviewService(
                 taskRepository,
                 patchStore,
                 new VersionedResumeService(resumeStore),
-                Clock.fixed(Instant.parse("2026-07-13T00:00:05Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-07-13T00:00:05Z"), ZoneOffset.UTC),
+                new EmptyEvidenceStore(),
+                (task, proposal, evidence) -> guardAssessment);
     }
 
     @Test
     void rejectedPolicyEvaluationNeverEntersPatchStore() {
-        var result = service.submit(
-                "task_01",
-                proposal(),
-                new PatchAssessment(0.5, List.of("降低耗时 50%"),
-                        List.of("UNSUPPORTED_METRIC")));
+        guardAssessment = new PatchAssessment(0.5, List.of("降低耗时 50%"),
+                List.of("UNSUPPORTED_METRIC"));
+        var result = service.submit("task_01", proposal());
 
         assertThat(result.decision()).isEqualTo(PolicyDecision.REJECT);
         assertThat(patchStore.findByTaskId("task_01")).isEmpty();
@@ -71,8 +75,7 @@ class ResumeReviewServiceTest {
 
     @Test
     void acceptedHumanDecisionMergesANewVersionAndCompletesTask() {
-        service.submit(
-                "task_01", proposal(), new PatchAssessment(1.0, List.of(), List.of()));
+        service.submit("task_01", proposal());
         service.decide("task_01", "rp_01", 1, ReviewStatus.ACCEPTED);
 
         var merged = service.merge("task_01", 1);
@@ -87,8 +90,7 @@ class ResumeReviewServiceTest {
 
     @Test
     void staleExpectedVersionCannotDecideOrMerge() {
-        service.submit(
-                "task_01", proposal(), new PatchAssessment(1.0, List.of(), List.of()));
+        service.submit("task_01", proposal());
 
         assertThatThrownBy(() -> service.decide(
                 "task_01", "rp_01", 2, ReviewStatus.ACCEPTED))
@@ -99,8 +101,7 @@ class ResumeReviewServiceTest {
 
     @Test
     void rejectedPatchCannotProduceAMergeVersion() {
-        service.submit(
-                "task_01", proposal(), new PatchAssessment(1.0, List.of(), List.of()));
+        service.submit("task_01", proposal());
         service.decide("task_01", "rp_01", 1, ReviewStatus.REJECTED);
 
         assertThatThrownBy(() -> service.merge("task_01", 1))
@@ -181,5 +182,11 @@ class ResumeReviewServiceTest {
                     .map(resume -> resume.path("version").asLong())
                     .sorted().toList();
         }
+    }
+
+    private static final class EmptyEvidenceStore implements EvidenceArtifactStore {
+        @Override public EvidenceArtifact save(EvidenceArtifact artifact) { return artifact; }
+        @Override public Optional<EvidenceArtifact> findById(String artifactId) { return Optional.empty(); }
+        @Override public List<EvidenceArtifact> findByTaskId(String taskId) { return List.of(); }
     }
 }

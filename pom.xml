@@ -15,6 +15,7 @@
     <module>modules/task-runtime</module>
     <module>modules/agent-workflow</module>
     <module>modules/infrastructure</module>
+    <module>modules/persistence-jpa</module>
   </modules>
 
   <properties>
