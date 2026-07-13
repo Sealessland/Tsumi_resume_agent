@@ -1,0 +1,19 @@
+{
+  "resumeId": "res_fixture",
+  "version": 1,
+  "schemaVersion": 13,
+  "profile": {},
+  "educations": [{ "id": "edu_01" }],
+  "skills": "",
+  "internships": [],
+  "projects": [{ "id": "project_01" }],
+  "studentExperiences": [],
+  "researchExperiences": [],
+  "customImages": [],
+  "awards": [],
+  "certificates": [],
+  "selfSummary": {},
+  "sectionVisibility": {},
+  "layout": {},
+  "theme": {}
+}

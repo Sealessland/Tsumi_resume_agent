@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsumi.dev/contracts/resume.schema.json",
+  "title": "Tsumi Resume AST v13",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "resumeId", "version", "schemaVersion", "profile", "educations",
+    "skills", "internships", "projects", "studentExperiences",
+    "researchExperiences", "customImages", "awards", "certificates", "selfSummary",
+    "sectionVisibility", "layout", "theme"
+  ],
+  "properties": {
+    "resumeId": { "type": "string", "pattern": "^res_[A-Za-z0-9_-]+$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "schemaVersion": { "const": 13 },
+    "profile": { "type": "object" },
+    "educations": { "$ref": "#/$defs/entities" },
+    "skills": { "type": "string" },
+    "internships": { "$ref": "#/$defs/entities" },
+    "projects": { "$ref": "#/$defs/entities" },
+    "studentExperiences": { "$ref": "#/$defs/entities" },
+    "researchExperiences": { "$ref": "#/$defs/entities" },
+    "customImages": { "$ref": "#/$defs/entities" },
+    "awards": { "$ref": "#/$defs/entities" },
+    "certificates": { "$ref": "#/$defs/entities" },
+    "selfSummary": { "type": "object" },
+    "sectionVisibility": { "type": "object" },
+    "layout": { "type": "object" },
+    "theme": { "type": "object" }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entity" }
+    }
+  }
+}
