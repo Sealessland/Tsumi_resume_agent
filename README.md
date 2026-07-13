@@ -2,7 +2,7 @@
 
 一个正在向 Evidence-first Agent 工作台演进的简历项目。前端保留 `Vue 3 + Vite` 的「左侧编辑 + 右侧实时预览」体验，后端采用 JDK 21 + Spring Boot 模块化单体。
 
-现有编辑、预览和导出链路保持可用；Java 侧已经提供可执行 Orchestrator API、本地确定性 Agent 适配器、显式任务状态机和共享 Resume/ResumePatch 合同。
+现有编辑、预览和导出链路保持可用；Java 侧已经提供可执行 Orchestrator API、本地确定性 Agent 适配器、显式任务状态机、不可变 Resume 版本、人工 Patch Review/Merge 和共享 Resume/ResumePatch 合同。
 
 ## 项目定位
 
@@ -93,7 +93,7 @@
 ```
 
 ResumePatch 当前只允许有完整证据引用的改写、重组、压缩、删除和已支持关键词抽取。
-无证据数字、新增事实和占位指标会在 Schema 层直接拒绝。
+缺少证据引用会在 Schema 层拒绝；证据覆盖不完整、新增事实和占位指标会被 Policy Guard 拒绝，且不会进入 PatchStore。
 
 ## 快速开始
 
@@ -136,10 +136,17 @@ java -jar apps/server/target/server-0.1.0-SNAPSHOT.jar
 
 ```bash
 curl http://localhost:8080/actuator/health
+
+curl -X POST http://localhost:8080/api/v1/resumes \
+  -H 'Content-Type: application/json' \
+  --data-binary @contracts/fixtures/resume/valid-minimal-v13.json
+
 curl -X POST http://localhost:8080/api/v1/tasks \
   -H 'Content-Type: application/json' \
   -d '{"resumeId":"res_fixture","baseVersion":1,"jobDescription":"Java Agent Engineer"}'
 ```
+
+任务只能引用已经导入的不可变 Resume 版本。完整的 Proposal、人工审核、合并和错误协议示例见 [`docs/api/local-review-workflow.md`](docs/api/local-review-workflow.md)。
 
 ## 使用说明
 
@@ -204,9 +211,9 @@ apps/
   web/                  # Vue 编辑、预览与导出
   server/               # 唯一 Spring Boot 可执行 API
 modules/
-  resume-domain/        # ResumePatch 等纯领域合同
+  resume-domain/        # Policy Guard、ResumePatch、Patch Engine
   task-runtime/         # 任务聚合、状态机、仓储端口
-  agent-workflow/       # Agent 端口与应用编排
+  agent-workflow/       # Agent 端口、Review/Merge 与版本用例
   infrastructure/       # Schema、内存仓储、本地 fake adapter
 contracts/              # Vue 与 Java 共用 JSON Schema/fixture
 scripts/                # 合同和 Java reactor 验证入口
