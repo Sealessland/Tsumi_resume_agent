@@ -34,4 +34,22 @@ class ResumeTaskTest {
         assertThatIllegalStateException().isThrownBy(() -> review.start(REVIEW_AT));
         assertThatIllegalStateException().isThrownBy(() -> review.fail("LATE_FAILURE", REVIEW_AT));
     }
+
+    @Test
+    void completesOnlyAfterTheTaskReachedHumanReview() {
+        var review = ResumeTask.created("task_01", "res_01", 3, CREATED_AT)
+                .start(STARTED_AT)
+                .requireReview("ready", REVIEW_AT);
+        var completedAt = Instant.parse("2026-07-13T00:00:03Z");
+
+        var completed = review.complete(completedAt);
+
+        assertThat(completed.status()).isEqualTo(TaskStatus.COMPLETED);
+        assertThat(completed.updatedAt()).isEqualTo(completedAt);
+        assertThatIllegalStateException()
+                .isThrownBy(() -> completed.complete(completedAt));
+        assertThatIllegalStateException()
+                .isThrownBy(() -> ResumeTask.created(
+                        "task_02", "res_01", 3, CREATED_AT).complete(completedAt));
+    }
 }

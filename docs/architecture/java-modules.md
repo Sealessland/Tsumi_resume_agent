@@ -25,7 +25,9 @@ agent-workflow -> task-runtime
 
 ## 当前本地纵切
 
-`POST /api/v1/tasks` 经过 Jakarta Validation 后进入 `TaskOrchestrator`。Orchestrator 按顺序持久化 `CREATED`、`RUNNING`、`REVIEW_REQUIRED`，并通过 `ResumeAgentWorkflow` 调用当前 adapter。`LocalDeterministicWorkflow` 只返回 `LOCAL_FAKE_READY_FOR_REVIEW`，不会生成 Patch 或新增简历事实。
+`POST /api/v1/tasks` 经过 Jakarta Validation 后进入 `TaskOrchestrator`。Orchestrator 按顺序持久化 `CREATED`、`RUNNING`、`REVIEW_REQUIRED`，并通过 `ResumeAgentWorkflow` 调用当前 adapter。`LocalDeterministicWorkflow` 只返回 `LOCAL_FAKE_READY_FOR_REVIEW`，不会生成 Patch 或新增简历事实。任务只有在 `REVIEW_REQUIRED` 后才能转为 `COMPLETED`，Agent 与 Controller 都不能绕过人工审核状态。
+
+模型输出使用独立的 `PatchProposal` 合同，不包含 `policyDecision` 或 `reviewStatus`。`PatchPolicy` 根据独立 `PatchAssessment` 生成服务器拥有的 `ResumePatch`；`ResumePatchEngine` 只合并 `ALLOW + ACCEPTED`、证据覆盖为 100%、不存在新增原子事实、版本和 before 值均匹配的 Patch。apply 和 revert 都创建新版本，稳定实体 ID 属于受保护字段。
 
 `GET /api/v1/tasks/{taskId}` 返回当前任务；未知任务统一返回带稳定 `TASK_NOT_FOUND` code 的 RFC 7807 响应。`/actuator/health` 是当前唯一暴露的 Actuator endpoint。
 

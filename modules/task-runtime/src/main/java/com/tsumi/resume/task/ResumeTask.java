@@ -41,6 +41,13 @@ public record ResumeTask(
                 workflowSummary, code, createdAt, now);
     }
 
+    public ResumeTask complete(Instant now) {
+        requireStatus(TaskStatus.REVIEW_REQUIRED);
+        return new ResumeTask(
+                taskId, resumeId, baseVersion, TaskStatus.COMPLETED,
+                workflowSummary, null, createdAt, now);
+    }
+
     private void requireStatus(TaskStatus expected) {
         if (status != expected) {
             throw new IllegalStateException(
