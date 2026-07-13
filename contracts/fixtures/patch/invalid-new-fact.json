@@ -1,0 +1,19 @@
+{
+  "patchId": "rp_invalid",
+  "taskId": "task_fixture",
+  "resumeId": "res_fixture",
+  "baseVersion": 1,
+  "op": "replace",
+  "path": "/projects/project_01/highlights/highlight_01",
+  "before": "实现简历导出功能。",
+  "after": "将简历导出耗时降低 50%。",
+  "intent": "PARAPHRASE",
+  "evidenceRefs": ["resume:projects/project_01"],
+  "jdRefs": [],
+  "evidenceCoverage": 0.5,
+  "newAtomicClaims": ["导出耗时降低 50%"],
+  "confidence": 0.99,
+  "riskFlags": ["UNSUPPORTED_METRIC"],
+  "policyDecision": "REJECT",
+  "reviewStatus": "PENDING"
+}

@@ -1,0 +1,19 @@
+{
+  "patchId": "rp_fixture",
+  "taskId": "task_fixture",
+  "resumeId": "res_fixture",
+  "baseVersion": 1,
+  "op": "replace",
+  "path": "/projects/project_01/highlights/highlight_01",
+  "before": "实现简历编辑和导出功能。",
+  "after": "打通结构化编辑、实时预览及 PDF/PNG 导出链路。",
+  "intent": "PARAPHRASE",
+  "evidenceRefs": ["resume:projects/project_01"],
+  "jdRefs": ["jd:delivery/export"],
+  "evidenceCoverage": 1.0,
+  "newAtomicClaims": [],
+  "confidence": 0.92,
+  "riskFlags": [],
+  "policyDecision": "ALLOW",
+  "reviewStatus": "PENDING"
+}
