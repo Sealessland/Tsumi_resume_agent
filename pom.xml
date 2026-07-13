@@ -12,6 +12,7 @@
   <modules>
     <module>modules/resume-domain</module>
     <module>modules/task-runtime</module>
+    <module>modules/agent-workflow</module>
     <module>modules/infrastructure</module>
   </modules>
 
