@@ -75,6 +75,20 @@
 - `Tailwind CSS 4`
 - `vuedraggable`
 
+## AI 全栈改造：共享契约基础
+
+前端与 Java 后端共享根目录 `contracts/` 中的 Resume AST 和 ResumePatch JSON Schema。
+任何协议修改必须同时通过 Vue/Vitest 与 Java/JUnit 的相同 fixture，避免两端数据模型漂移。
+
+运行环境要求：Node.js `>=22.12`、JDK `21`、Maven `3.9+`。
+
+```bash
+./scripts/verify-contracts.sh
+```
+
+ResumePatch 当前只允许有完整证据引用的改写、重组、压缩、删除和已支持关键词抽取。
+无证据数字、新增事实和占位指标会在 Schema 层直接拒绝。
+
 ## 快速开始
 
 ### 安装依赖
