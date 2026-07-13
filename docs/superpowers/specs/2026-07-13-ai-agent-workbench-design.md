@@ -200,7 +200,7 @@ Every state transition is validated by the domain layer and saved as a checkpoin
 
 ### 8.1 Resume AST
 
-The current normalized JSON becomes a versioned JSON Schema. Stable identifiers are added to repeatable entities so patches do not depend on array positions alone.
+The current normalized JSON uses `meta.schemaVersion = 12`. The shared server envelope advances this to schema version 13, moves the version marker to the envelope, and retains stable identifiers on repeatable entities so patches do not depend on array positions alone.
 
 Required envelope fields:
 
@@ -208,13 +208,14 @@ Required envelope fields:
 {
   "resumeId": "res_01",
   "version": 12,
-  "schemaVersion": 9,
+  "schemaVersion": 13,
   "profile": {},
   "educations": [],
   "internships": [],
   "projects": [],
   "studentExperiences": [],
   "researchExperiences": [],
+  "customImages": [],
   "skills": "",
   "awards": [],
   "certificates": [],
