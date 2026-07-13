@@ -20,6 +20,16 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>com.tsumi.resume</groupId>
+      <artifactId>task-runtime</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.tsumi.resume</groupId>
+      <artifactId>agent-workflow</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>

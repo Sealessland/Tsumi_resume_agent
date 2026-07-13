@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: tsumi-resume-orchestrator
+  mvc:
+    problemdetails:
+      enabled: true
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
