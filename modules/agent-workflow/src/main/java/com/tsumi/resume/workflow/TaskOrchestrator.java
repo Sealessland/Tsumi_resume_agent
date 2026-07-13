@@ -32,18 +32,26 @@ public final class TaskOrchestrator {
         resumeVersionReader.get(command.resumeId(), command.baseVersion());
         var taskId = taskIdSupplier.get();
         var created = ResumeTask.created(
-                taskId, command.resumeId(), command.baseVersion(), clock.instant());
+                taskId,
+                command.resumeId(),
+                command.baseVersion(),
+                "trace_" + taskId.substring("task_".length()),
+                clock.instant());
         taskRepository.save(created);
 
-        var running = created.start(clock.instant());
-        taskRepository.save(running);
+        var analyzing = created.analyze(clock.instant());
+        taskRepository.save(analyzing);
 
         var workflowResult = workflow.execute(new WorkflowInput(
                 taskId,
                 command.resumeId(),
                 command.baseVersion(),
                 command.jobDescription()));
-        var review = running.requireReview(workflowResult.summary(), clock.instant());
+        var proposing = analyzing.propose(clock.instant());
+        taskRepository.save(proposing);
+        var verifying = proposing.verify(clock.instant());
+        taskRepository.save(verifying);
+        var review = verifying.reviewReady(workflowResult.summary(), clock.instant());
         return taskRepository.save(review);
     }
 

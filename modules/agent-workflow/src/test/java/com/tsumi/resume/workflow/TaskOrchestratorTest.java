@@ -34,10 +34,16 @@ class TaskOrchestratorTest {
         var result = orchestrator.create(new CreateTaskCommand("res_01", 3, "Java Agent Engineer"));
 
         assertThat(repository.saved).extracting(ResumeTask::status)
-                .containsExactly(TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.REVIEW_REQUIRED);
+                .containsExactly(
+                        TaskStatus.CREATED,
+                        TaskStatus.ANALYZING,
+                        TaskStatus.PROPOSING,
+                        TaskStatus.VERIFYING,
+                        TaskStatus.REVIEW_READY);
         assertThat(workflow.received).isEqualTo(
                 new WorkflowInput("task_01", "res_01", 3, "Java Agent Engineer"));
         assertThat(result.workflowSummary()).isEqualTo("LOCAL_FAKE_READY_FOR_REVIEW");
+        assertThat(result.traceId()).isEqualTo("trace_01");
     }
 
     @Test

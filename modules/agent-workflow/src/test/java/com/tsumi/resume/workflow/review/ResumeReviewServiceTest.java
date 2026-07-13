@@ -42,9 +42,12 @@ class ResumeReviewServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         var now = Instant.parse("2026-07-13T00:00:00Z");
-        taskRepository.save(ResumeTask.created("task_01", "res_fixture", 1, now)
-                .start(now)
-                .requireReview("ready", now));
+        taskRepository.save(ResumeTask.created(
+                        "task_01", "res_fixture", 1, "trace_01", now)
+                .analyze(now)
+                .propose(now)
+                .verify(now)
+                .reviewReady("ready", now));
         resumeStore.save((ObjectNode) objectMapper.readTree(
                 contracts.resolve("fixtures/resume/valid-minimal-v13.json").toFile()));
         service = new ResumeReviewService(

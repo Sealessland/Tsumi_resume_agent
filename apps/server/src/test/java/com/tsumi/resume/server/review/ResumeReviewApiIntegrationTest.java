@@ -59,7 +59,7 @@ class ResumeReviewApiIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("REVIEW_REQUIRED"))
+                .andExpect(jsonPath("$.status").value("REVIEW_READY"))
                 .andReturn();
         var taskId = objectMapper.readTree(taskResponse.getResponse().getContentAsByteArray())
                 .path("taskId").asText();

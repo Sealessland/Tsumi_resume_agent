@@ -82,7 +82,7 @@ public final class ResumeReviewService {
         var base = resumeService.get(task.resumeId(), expectedBaseVersion);
         var merged = patchEngine.applyAll(base, accepted);
         var saved = resumeService.register(merged);
-        taskRepository.save(task.complete(clock.instant()));
+        taskRepository.save(task.approve(clock.instant()).complete(clock.instant()));
         return saved;
     }
 

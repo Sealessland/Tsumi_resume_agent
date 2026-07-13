@@ -11,6 +11,11 @@ public record TaskResponse(
         TaskStatus status,
         String workflowSummary,
         String failureCode,
+        boolean failureRetryable,
+        int attempt,
+        int repairCount,
+        String traceId,
+        long revision,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -22,6 +27,11 @@ public record TaskResponse(
                 task.status(),
                 task.workflowSummary(),
                 task.failureCode(),
+                task.failureRetryable(),
+                task.attempt(),
+                task.repairCount(),
+                task.traceId(),
+                task.revision(),
                 task.createdAt(),
                 task.updatedAt());
     }

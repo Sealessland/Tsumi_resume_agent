@@ -35,7 +35,11 @@ class TaskApiIntegrationTest {
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", startsWith("/api/v1/tasks/task_")))
-                .andExpect(jsonPath("$.status").value("REVIEW_REQUIRED"))
+                .andExpect(jsonPath("$.status").value("REVIEW_READY"))
+                .andExpect(jsonPath("$.attempt").value(1))
+                .andExpect(jsonPath("$.repairCount").value(0))
+                .andExpect(jsonPath("$.traceId", startsWith("trace_")))
+                .andExpect(jsonPath("$.revision").value(4))
                 .andExpect(jsonPath("$.workflowSummary")
                         .value("LOCAL_FAKE_READY_FOR_REVIEW"))
                 .andReturn();
