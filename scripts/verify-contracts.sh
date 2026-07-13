@@ -9,4 +9,4 @@ npm test -- src/modules/resume/contracts.test.js
 npm run build
 
 cd "$repo_root"
-mvn -q -pl modules/resume-domain test
+mvn -q -pl modules/resume-domain,modules/infrastructure -am test

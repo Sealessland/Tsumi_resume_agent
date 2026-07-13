@@ -1,12 +1,13 @@
 # Tsumi Resume Studio
 
-一个基于 `Vue 3 + Vite` 的本地简历构建器，采用「左侧编辑 + 右侧实时预览」的双栏工作流，面向中文技术简历场景。
+一个正在向 Evidence-first Agent 工作台演进的简历项目。前端保留 `Vue 3 + Vite` 的「左侧编辑 + 右侧实时预览」体验，后端采用 JDK 21 + Spring Boot 模块化单体。
 
-项目围绕“内容编辑”和“成品导出”两个核心环节组织界面。当前版本已经实现本地草稿保存、实时 A4 预览、JSON 导入导出、PNG / PDF 导出、头像与 Logo 上传、主题配色与字体调节等完整链路。
+现有编辑、预览和导出链路保持可用；Java 侧已经提供可执行 Orchestrator API、本地确定性 Agent 适配器、显式任务状态机和共享 Resume/ResumePatch 合同。
 
 ## 项目定位
 
-- 纯前端本地应用，无后端服务依赖
+- Web 编辑器可独立本地运行；Agent 能力通过独立 Spring Boot API 接入
+- Agent 只能生成有证据约束的候选修改，最终合并必须由用户确认
 - 默认围绕一页 A4 中文简历布局设计
 - 支持校招 / 社招常见模块：教育、技能、实习、项目、奖项、证书、自我评价
 - 面向“可打印、可导出、可本地持久化”的技术简历场景
@@ -74,6 +75,10 @@
 - `TDesign Vue Next`
 - `Tailwind CSS 4`
 - `vuedraggable`
+- `JDK 21`
+- `Spring Boot 3.5.16`
+- `Spring AI Alibaba 1.1.2.2`（已固定 BOM，真实模型 adapter 在后续纵切接入）
+- `Maven`
 
 ## AI 全栈改造：共享契约基础
 
@@ -84,6 +89,7 @@
 
 ```bash
 ./scripts/verify-contracts.sh
+./scripts/verify-java.sh
 ```
 
 ResumePatch 当前只允许有完整证据引用的改写、重组、压缩、删除和已支持关键词抽取。
@@ -94,25 +100,45 @@ ResumePatch 当前只允许有完整证据引用的改写、重组、压缩、�
 ### 安装依赖
 
 ```bash
+cd apps/web
 npm install
 ```
 
 ### 启动开发环境
 
 ```bash
+cd apps/web
 npm run dev
 ```
 
 ### 生产构建
 
 ```bash
+cd apps/web
 npm run build
 ```
 
 ### 预览构建结果
 
 ```bash
+cd apps/web
 npm run preview
+```
+
+### 启动 Java Orchestrator
+
+```bash
+mvn -pl apps/server -am package
+java -jar apps/server/target/server-0.1.0-SNAPSHOT.jar
+```
+
+本地默认使用 `LocalDeterministicWorkflow`，不会调用外部模型，也不会生成或编造简历事实。
+
+```bash
+curl http://localhost:8080/actuator/health
+curl -X POST http://localhost:8080/api/v1/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"resumeId":"res_fixture","baseVersion":1,"jobDescription":"Java Agent Engineer"}'
 ```
 
 ## 使用说明
@@ -174,23 +200,16 @@ JSON 导入导出是应用层的数据交换入口。
 ## 项目结构
 
 ```text
-src/
-  components/resume/
-    ResumeToolbar.vue   # 顶部工具栏
-    ResumeEditor.vue    # 左侧编辑器
-    ResumePreview.vue   # 右侧预览页
-  composables/
-    useResumeBuilder.js # 核心状态与交互逻辑
-  modules/resume/
-    templates.js        # 示例数据与空白模板
-    normalize.js        # 数据兼容与结构规范化
-    storage.js          # IndexedDB / localStorage 持久化
-    photo.js            # 证件照处理与压缩
-    photoConfig.js      # 证件照尺寸与比例
-    sections.js         # 模块顺序定义
-    color.js            # 主题色派生
-    nameFont.js         # 姓名 / 学校字体配置
-    typography.js       # 字号约束
+apps/
+  web/                  # Vue 编辑、预览与导出
+  server/               # 唯一 Spring Boot 可执行 API
+modules/
+  resume-domain/        # ResumePatch 等纯领域合同
+  task-runtime/         # 任务聚合、状态机、仓储端口
+  agent-workflow/       # Agent 端口与应用编排
+  infrastructure/       # Schema、内存仓储、本地 fake adapter
+contracts/              # Vue 与 Java 共用 JSON Schema/fixture
+scripts/                # 合同和 Java reactor 验证入口
 ```
 
 ## 实现细节说明
@@ -220,7 +239,9 @@ src/
 
 ## 开发说明
 
-项目没有额外的环境变量要求，也没有后端服务依赖。克隆后安装依赖即可启动。
+本地模式没有 API Key、数据库、RocketMQ 或 Docker 依赖。真实模型、持久化、消息队列与沙箱都必须通过 infrastructure adapter 接入，不能进入领域模块。
+
+Java 模块说明见 [`docs/architecture/java-modules.md`](docs/architecture/java-modules.md)。
 
 ## License
 
