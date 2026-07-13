@@ -6,7 +6,10 @@
   "educations": [{ "id": "edu_01" }],
   "skills": "",
   "internships": [],
-  "projects": [{ "id": "project_01" }],
+  "projects": [{
+    "id": "project_01",
+    "description": "实现简历编辑和导出功能。"
+  }],
   "studentExperiences": [],
   "researchExperiences": [],
   "customImages": [],

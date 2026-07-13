@@ -36,4 +36,24 @@ class JsonContractValidatorTest {
         assertThat(validator.validate(
                 contracts.resolve("fixtures/patch/invalid-new-fact.json")).valid()).isFalse();
     }
+
+    @Test
+    void acceptsSharedModelProposalWithoutServerOwnedDecisionFields() {
+        var validator = new JsonContractValidator(
+                contracts.resolve("resume-patch-proposal.schema.json"));
+
+        assertThat(validator.validate(
+                contracts.resolve("fixtures/patch/valid-paraphrase-proposal.json")).valid())
+                .isTrue();
+    }
+
+    @Test
+    void rejectsSharedModelProposalWithoutEvidenceReferences() {
+        var validator = new JsonContractValidator(
+                contracts.resolve("resume-patch-proposal.schema.json"));
+
+        assertThat(validator.validate(
+                contracts.resolve("fixtures/patch/invalid-missing-evidence-proposal.json")).valid())
+                .isFalse();
+    }
 }

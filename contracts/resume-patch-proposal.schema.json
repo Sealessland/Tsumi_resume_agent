@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsumi.dev/contracts/resume-patch-proposal.schema.json",
+  "title": "Tsumi Resume PatchProposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "patchId", "taskId", "resumeId", "baseVersion", "op", "path",
+    "before", "after", "intent", "evidenceRefs", "jdRefs", "confidence"
+  ],
+  "properties": {
+    "patchId": { "type": "string", "pattern": "^rp_[A-Za-z0-9_-]+$" },
+    "taskId": { "type": "string", "pattern": "^task_[A-Za-z0-9_-]+$" },
+    "resumeId": { "type": "string", "pattern": "^res_[A-Za-z0-9_-]+$" },
+    "baseVersion": { "type": "integer", "minimum": 1 },
+    "op": { "enum": ["replace", "remove"] },
+    "path": { "type": "string", "pattern": "^/" },
+    "before": { "type": "string" },
+    "after": { "type": "string" },
+    "intent": {
+      "enum": ["PARAPHRASE", "RESTRUCTURE", "COMPRESS", "DELETE", "EXTRACT_SUPPORTED_KEYWORD"]
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "jdRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "op": { "const": "remove" } }, "required": ["op"] },
+      "then": { "properties": { "intent": { "const": "DELETE" }, "after": { "const": "" } } }
+    }
+  ]
+}

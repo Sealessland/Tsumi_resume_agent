@@ -4,7 +4,7 @@
   "resumeId": "res_fixture",
   "baseVersion": 1,
   "op": "replace",
-  "path": "/projects/project_01/highlights/highlight_01",
+  "path": "/projects/project_01/description",
   "before": "实现简历导出功能。",
   "after": "将简历导出耗时降低 50%。",
   "intent": "PARAPHRASE",

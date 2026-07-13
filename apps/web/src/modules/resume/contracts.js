@@ -1,9 +1,11 @@
 import Ajv2020 from 'ajv/dist/2020'
+import resumePatchProposalSchema from '../../../../../contracts/resume-patch-proposal.schema.json'
 import resumePatchSchema from '../../../../../contracts/resume-patch.schema.json'
 import resumeSchema from '../../../../../contracts/resume.schema.json'
 import { normalizeResumeData } from './normalize'
 
 const ajv = new Ajv2020({ allErrors: true, strict: true })
+const resumePatchProposalValidator = ajv.compile(resumePatchProposalSchema)
 const resumePatchValidator = ajv.compile(resumePatchSchema)
 const resumeValidator = ajv.compile(resumeSchema)
 
@@ -29,6 +31,14 @@ export function validateResumePatch(value) {
   return {
     valid,
     errors: valid ? [] : normalizeErrors(resumePatchValidator.errors),
+  }
+}
+
+export function validateResumePatchProposal(value) {
+  const valid = resumePatchProposalValidator(value)
+  return {
+    valid,
+    errors: valid ? [] : normalizeErrors(resumePatchProposalValidator.errors),
   }
 }
 

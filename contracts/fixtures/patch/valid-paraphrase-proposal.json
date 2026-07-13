@@ -10,10 +10,5 @@
   "intent": "PARAPHRASE",
   "evidenceRefs": ["resume:projects/project_01"],
   "jdRefs": ["jd:delivery/export"],
-  "evidenceCoverage": 1.0,
-  "newAtomicClaims": [],
-  "confidence": 0.92,
-  "riskFlags": [],
-  "policyDecision": "ALLOW",
-  "reviewStatus": "PENDING"
+  "confidence": 0.92
 }
