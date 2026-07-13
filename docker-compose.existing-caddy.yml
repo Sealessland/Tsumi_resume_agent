@@ -1,0 +1,14 @@
+services:
+  resume-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tsumi-resume-app
+    restart: unless-stopped
+    networks:
+      - caddy_shared
+
+networks:
+  caddy_shared:
+    external: true
+    name: ${CADDY_DOCKER_NETWORK:-caddy}

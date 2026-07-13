@@ -1,0 +1,36 @@
+services:
+  resume-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tsumi-resume-app
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - resume-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: tsumi-resume-caddy
+    restart: unless-stopped
+    depends_on:
+      - resume-app
+    environment:
+      DOMAIN: resume.hatsumi.fun
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - resume-net
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  resume-net:
