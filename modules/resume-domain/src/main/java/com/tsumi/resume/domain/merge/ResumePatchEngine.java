@@ -8,14 +8,43 @@ import com.tsumi.resume.domain.patch.PolicyDecision;
 import com.tsumi.resume.domain.patch.ResumePatch;
 import com.tsumi.resume.domain.patch.ReviewStatus;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 
 public final class ResumePatchEngine {
 
     public ObjectNode apply(ObjectNode source, ResumePatch patch) {
-        requireMergeable(patch);
-        requireIdentityAndVersion(source, patch, patch.baseVersion());
+        return applyAll(source, List.of(patch));
+    }
+
+    public ObjectNode applyAll(ObjectNode source, List<ResumePatch> patches) {
+        if (patches.isEmpty()) {
+            throw new PatchConflictException("Patch merge requires at least one patch");
+        }
+        var first = patches.getFirst();
+        requireMergeable(first);
+        requireIdentityAndVersion(source, first, first.baseVersion());
         var copy = source.deepCopy();
+        var paths = new HashSet<String>();
+        for (var patch : patches) {
+            requireMergeable(patch);
+            if (!patch.resumeId().equals(first.resumeId())) {
+                throw new PatchConflictException("All patches must target the same resume");
+            }
+            if (patch.baseVersion() != first.baseVersion()) {
+                throw new VersionConflictException(first.baseVersion(), patch.baseVersion());
+            }
+            if (!paths.add(patch.path())) {
+                throw new PatchConflictException(
+                        "Patch batch contains duplicate path: " + patch.path());
+            }
+            applyContent(copy, patch);
+        }
+        copy.put("version", first.baseVersion() + 1);
+        return copy;
+    }
+
+    private void applyContent(ObjectNode copy, ResumePatch patch) {
         var target = resolveTarget(copy, patch.path());
         var current = target.parent().get(target.field());
         requireTextValue(current, patch.path());
@@ -29,8 +58,6 @@ public final class ResumePatchEngine {
         } else {
             target.parent().put(target.field(), patch.after());
         }
-        copy.put("version", patch.baseVersion() + 1);
-        return copy;
     }
 
     public ObjectNode revert(ObjectNode currentResume, ResumePatch appliedPatch) {

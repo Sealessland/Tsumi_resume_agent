@@ -121,6 +121,33 @@ class ResumePatchEngineTest {
                 .hasMessageContaining("protected");
     }
 
+    @Test
+    void mergesMultipleAcceptedPatchesIntoOneNewVersion() throws Exception {
+        var result = engine.applyAll(
+                fixture(), List.of(acceptedReplacePatch(), acceptedSkillsPatch(1)));
+
+        assertThat(result.path("version").asLong()).isEqualTo(2);
+        assertThat(result.path("skills").asText()).isEqualTo("Java, Spring Boot");
+        assertThat(result.at("/projects/0/description").asText())
+                .isEqualTo("打通结构化编辑、实时预览及 PDF/PNG 导出链路。");
+    }
+
+    @Test
+    void rejectsDuplicatePathsInOneMerge() throws Exception {
+        var patch = acceptedReplacePatch();
+
+        assertThatThrownBy(() -> engine.applyAll(fixture(), List.of(patch, patch)))
+                .isInstanceOf(PatchConflictException.class)
+                .hasMessageContaining("duplicate path");
+    }
+
+    @Test
+    void rejectsPatchesFromDifferentBaseVersions() throws Exception {
+        assertThatThrownBy(() -> engine.applyAll(
+                fixture(), List.of(acceptedReplacePatch(), acceptedSkillsPatch(2))))
+                .isInstanceOf(VersionConflictException.class);
+    }
+
     private ObjectNode fixture() throws Exception {
         return (ObjectNode) objectMapper.readTree(
                 contracts.resolve("fixtures/resume/valid-minimal-v13.json").toFile());
@@ -155,6 +182,18 @@ class ResumePatchEngineTest {
                 "/projects/project_01/description",
                 "实现简历编辑和导出功能。", "", PatchIntent.DELETE,
                 List.of("resume:projects/project_01"), List.of(), 0.9);
+        return new PatchPolicy().evaluate(
+                proposal, new PatchAssessment(1.0, List.of(), List.of()))
+                .patch().orElseThrow().reviewedAs(ReviewStatus.ACCEPTED);
+    }
+
+    private ResumePatch acceptedSkillsPatch(long baseVersion) {
+        var proposal = new PatchProposal(
+                "rp_skills", "task_01", "res_fixture", baseVersion,
+                PatchOperation.REPLACE, "/skills", "", "Java, Spring Boot",
+                PatchIntent.EXTRACT_SUPPORTED_KEYWORD,
+                List.of("resume:projects/project_01"),
+                List.of("jd:skills/java"), 0.9);
         return new PatchPolicy().evaluate(
                 proposal, new PatchAssessment(1.0, List.of(), List.of()))
                 .patch().orElseThrow().reviewedAs(ReviewStatus.ACCEPTED);
