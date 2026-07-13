@@ -23,11 +23,12 @@ class TaskApiIntegrationTest {
 
     @Test
     void createsAndReadsALocalAgentTask() throws Exception {
+        importResume("res_task_api");
         var response = mockMvc.perform(post("/api/v1/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "resumeId": "res_fixture",
+                                  "resumeId": "res_task_api",
                                   "baseVersion": 1,
                                   "jobDescription": "Java Agent Engineer"
                                 }
@@ -46,7 +47,22 @@ class TaskApiIntegrationTest {
         mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.taskId").value(taskId))
-                .andExpect(jsonPath("$.resumeId").value("res_fixture"));
+                .andExpect(jsonPath("$.resumeId").value("res_task_api"));
+    }
+
+    @Test
+    void refusesToCreateATaskForAnUnknownResumeVersion() throws Exception {
+        mockMvc.perform(post("/api/v1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "resumeId": "res_missing",
+                                  "baseVersion": 1,
+                                  "jobDescription": "Java Agent Engineer"
+                                }
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESUME_VERSION_NOT_FOUND"));
     }
 
     @Test
@@ -72,5 +88,20 @@ class TaskApiIntegrationTest {
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    private void importResume(String resumeId) throws Exception {
+        mockMvc.perform(post("/api/v1/resumes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "resumeId":"%s","version":1,"schemaVersion":13,
+                                  "profile":{},"educations":[],"skills":"","internships":[],
+                                  "projects":[],"studentExperiences":[],"researchExperiences":[],
+                                  "customImages":[],"awards":[],"certificates":[],"selfSummary":{},
+                                  "sectionVisibility":{},"layout":{},"theme":{}
+                                }
+                                """.formatted(resumeId)))
+                .andExpect(status().isCreated());
     }
 }

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public final class VersionedResumeService {
+public final class VersionedResumeService implements ResumeVersionReader {
 
     private static final Pattern RESUME_ID = Pattern.compile("^res_[A-Za-z0-9_-]+$");
 
@@ -24,6 +24,7 @@ public final class VersionedResumeService {
         return store.save(resume.deepCopy()).deepCopy();
     }
 
+    @Override
     public ObjectNode get(String resumeId, long version) {
         return store.find(resumeId, version)
                 .map(ObjectNode::deepCopy)

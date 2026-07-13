@@ -3,28 +3,33 @@ package com.tsumi.resume.workflow;
 import com.tsumi.resume.task.ResumeTask;
 import com.tsumi.resume.task.TaskNotFoundException;
 import com.tsumi.resume.task.TaskRepository;
+import com.tsumi.resume.workflow.resume.ResumeVersionReader;
 import java.time.Clock;
 import java.util.function.Supplier;
 
 public final class TaskOrchestrator {
 
     private final TaskRepository taskRepository;
+    private final ResumeVersionReader resumeVersionReader;
     private final ResumeAgentWorkflow workflow;
     private final Clock clock;
     private final Supplier<String> taskIdSupplier;
 
     public TaskOrchestrator(
             TaskRepository taskRepository,
+            ResumeVersionReader resumeVersionReader,
             ResumeAgentWorkflow workflow,
             Clock clock,
             Supplier<String> taskIdSupplier) {
         this.taskRepository = taskRepository;
+        this.resumeVersionReader = resumeVersionReader;
         this.workflow = workflow;
         this.clock = clock;
         this.taskIdSupplier = taskIdSupplier;
     }
 
     public ResumeTask create(CreateTaskCommand command) {
+        resumeVersionReader.get(command.resumeId(), command.baseVersion());
         var taskId = taskIdSupplier.get();
         var created = ResumeTask.created(
                 taskId, command.resumeId(), command.baseVersion(), clock.instant());

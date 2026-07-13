@@ -14,6 +14,7 @@ import com.tsumi.resume.task.TaskNotFoundException;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
 import java.time.Clock;
+import java.util.List;
 
 public final class ResumeReviewService {
 
@@ -61,6 +62,11 @@ public final class ResumeReviewService {
             throw new VersionConflictException(patch.baseVersion(), expectedBaseVersion);
         }
         return patchStore.save(patch.reviewedAs(decision));
+    }
+
+    public List<ResumePatch> patches(String taskId) {
+        task(taskId);
+        return List.copyOf(patchStore.findByTaskId(taskId));
     }
 
     public ObjectNode merge(String taskId, long expectedBaseVersion) {

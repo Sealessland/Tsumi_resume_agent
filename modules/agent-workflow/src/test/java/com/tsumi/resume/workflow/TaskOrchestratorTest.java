@@ -7,6 +7,7 @@ import com.tsumi.resume.task.ResumeTask;
 import com.tsumi.resume.task.TaskNotFoundException;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.task.TaskStatus;
+import com.tsumi.resume.workflow.resume.ResumeVersionNotFoundException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -22,7 +23,13 @@ class TaskOrchestratorTest {
         var repository = new RecordingTaskRepository();
         var workflow = new RecordingWorkflow();
         var clock = Clock.fixed(Instant.parse("2026-07-13T00:00:00Z"), ZoneOffset.UTC);
-        var orchestrator = new TaskOrchestrator(repository, workflow, clock, () -> "task_01");
+        var orchestrator = new TaskOrchestrator(
+                repository,
+                (resumeId, version) -> new com.fasterxml.jackson.databind.ObjectMapper()
+                        .createObjectNode(),
+                workflow,
+                clock,
+                () -> "task_01");
 
         var result = orchestrator.create(new CreateTaskCommand("res_01", 3, "Java Agent Engineer"));
 
@@ -36,11 +43,34 @@ class TaskOrchestratorTest {
     @Test
     void reportsUnknownTaskThroughTheDomainException() {
         var orchestrator = new TaskOrchestrator(
-                new RecordingTaskRepository(), input -> new WorkflowResult("unused"),
+                new RecordingTaskRepository(),
+                (resumeId, version) -> new com.fasterxml.jackson.databind.ObjectMapper()
+                        .createObjectNode(),
+                input -> new WorkflowResult("unused"),
                 Clock.systemUTC(), () -> "task_01");
 
         assertThatThrownBy(() -> orchestrator.get("task_missing"))
                 .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void validatesTheImmutableResumeVersionBeforePersistingATask() {
+        var repository = new RecordingTaskRepository();
+        var workflow = new RecordingWorkflow();
+        var orchestrator = new TaskOrchestrator(
+                repository,
+                (resumeId, version) -> {
+                    throw new ResumeVersionNotFoundException(resumeId, version);
+                },
+                workflow,
+                Clock.systemUTC(),
+                () -> "task_01");
+
+        assertThatThrownBy(() -> orchestrator.create(
+                new CreateTaskCommand("res_missing", 1, "Java Agent Engineer")))
+                .isInstanceOf(ResumeVersionNotFoundException.class);
+        assertThat(repository.saved).isEmpty();
+        assertThat(workflow.received).isNull();
     }
 
     private static final class RecordingWorkflow implements ResumeAgentWorkflow {

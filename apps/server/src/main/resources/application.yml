@@ -1,6 +1,9 @@
 spring:
   application:
     name: tsumi-resume-orchestrator
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
   mvc:
     problemdetails:
       enabled: true
