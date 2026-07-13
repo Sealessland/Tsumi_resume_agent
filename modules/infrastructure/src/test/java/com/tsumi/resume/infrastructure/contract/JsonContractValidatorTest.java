@@ -1,4 +1,4 @@
-package com.tsumi.resume.domain.contract;
+package com.tsumi.resume.infrastructure.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -8,11 +8,10 @@ import org.junit.jupiter.api.Test;
 class JsonContractValidatorTest {
 
     private final Path contracts = Path.of(System.getProperty("contracts.dir"));
-    private final JsonContractValidator validator =
-            new JsonContractValidator(contracts.resolve("resume.schema.json"));
 
     @Test
     void acceptsSharedValidResumeFixture() {
+        var validator = new JsonContractValidator(contracts.resolve("resume.schema.json"));
         var result = validator.validate(
                 contracts.resolve("fixtures/resume/valid-minimal-v13.json"));
 
@@ -22,10 +21,19 @@ class JsonContractValidatorTest {
 
     @Test
     void rejectsSharedFixtureWithoutVersion() {
+        var validator = new JsonContractValidator(contracts.resolve("resume.schema.json"));
         var result = validator.validate(
                 contracts.resolve("fixtures/resume/invalid-missing-version.json"));
 
         assertThat(result.valid()).isFalse();
         assertThat(result.errors()).anyMatch(message -> message.contains("version"));
+    }
+
+    @Test
+    void rejectsSharedPatchContainingUnsupportedClaim() {
+        var validator = new JsonContractValidator(contracts.resolve("resume-patch.schema.json"));
+
+        assertThat(validator.validate(
+                contracts.resolve("fixtures/patch/invalid-new-fact.json")).valid()).isFalse();
     }
 }

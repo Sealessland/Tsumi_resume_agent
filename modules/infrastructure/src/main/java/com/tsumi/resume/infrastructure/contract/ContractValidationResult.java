@@ -1,4 +1,4 @@
-package com.tsumi.resume.domain.contract;
+package com.tsumi.resume.infrastructure.contract;
 
 import java.util.List;
 
