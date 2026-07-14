@@ -7,6 +7,9 @@ import com.tsumi.resume.task.NewTaskEvent;
 import com.tsumi.resume.task.ResumeTask;
 import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.task.TaskNotFoundException;
+import com.tsumi.resume.task.TaskCancelledException;
+import com.tsumi.resume.task.TaskNotRetryableException;
+import com.tsumi.resume.task.TaskStatus;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.workflow.resume.ResumeVersionReader;
 import java.nio.charset.StandardCharsets;
@@ -68,6 +71,9 @@ public final class AsyncTaskService {
     public ResumeTask cancel(String taskId) {
         return unitOfWork.execute(() -> {
             var current = get(taskId);
+            if (current.status() == TaskStatus.CANCELLED) {
+                throw new TaskCancelledException(taskId);
+            }
             var cancelled = tasks.save(current.cancel(clock.instant()));
             append(cancelled, "task.cancelled", Map.of("cancelledBy", "human"));
             return cancelled;
@@ -77,6 +83,12 @@ public final class AsyncTaskService {
     public ResumeTask retry(String taskId) {
         var retried = unitOfWork.execute(() -> {
             var current = get(taskId);
+            if (current.status() == TaskStatus.CANCELLED) {
+                throw new TaskCancelledException(taskId);
+            }
+            if (current.status() != TaskStatus.FAILED || !current.failureRetryable()) {
+                throw new TaskNotRetryableException(taskId);
+            }
             requests.find(taskId).orElseThrow(() -> new IllegalStateException("Workflow request is missing"));
             var next = tasks.save(current.retry(clock.instant()));
             append(next, "task.retry.requested", Map.of("attempt", Integer.toString(next.attempt())));

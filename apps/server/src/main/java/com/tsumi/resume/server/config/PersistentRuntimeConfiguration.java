@@ -16,6 +16,8 @@ import com.tsumi.resume.workflow.resume.ResumeVersionStore;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
 import com.tsumi.resume.workflow.review.PatchStore;
 import com.tsumi.resume.workflow.review.ResumeReviewService;
+import com.tsumi.resume.workflow.review.CoverageGapStore;
+import com.tsumi.resume.workflow.review.ReviewSurfaceService;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.UUID;
@@ -57,10 +59,21 @@ public class PersistentRuntimeConfiguration {
             EvidenceArtifactStore evidenceStore,
             EvidenceGuard evidenceGuard,
             UnitOfWork unitOfWork,
-            TaskEventStore taskEvents) {
+            TaskEventStore taskEvents,
+            CoverageGapStore coverageGaps) {
         return new ResumeReviewService(
                 taskRepository, patchStore, resumeService, clock,
-                evidenceStore, evidenceGuard, unitOfWork, taskEvents);
+                evidenceStore, evidenceGuard, unitOfWork, taskEvents, coverageGaps);
+    }
+
+    @Bean
+    ReviewSurfaceService reviewSurfaceService(
+            TaskRepository tasks,
+            PatchStore patches,
+            EvidenceArtifactStore evidence,
+            TaskEventStore events,
+            CoverageGapStore gaps) {
+        return new ReviewSurfaceService(tasks, patches, evidence, events, gaps);
     }
 
     @Bean

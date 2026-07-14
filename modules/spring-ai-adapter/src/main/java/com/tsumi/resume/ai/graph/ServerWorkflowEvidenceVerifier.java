@@ -8,6 +8,7 @@ import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.workflow.WorkflowInput;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
 import com.tsumi.resume.workflow.evidence.EvidenceGuard;
+import com.tsumi.resume.workflow.review.CoverageGap;
 import com.tsumi.resume.workflow.evidence.EvidenceNotApprovedException;
 import com.tsumi.resume.workflow.evidence.ProposalBaseMismatchException;
 import java.util.ArrayList;

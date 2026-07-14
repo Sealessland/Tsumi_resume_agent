@@ -8,7 +8,7 @@
     "patchId", "taskId", "resumeId", "baseVersion", "op", "path",
     "before", "after", "intent", "evidenceRefs", "jdRefs",
     "evidenceCoverage", "newAtomicClaims", "confidence", "riskFlags",
-    "policyDecision", "reviewStatus"
+    "claimAssessments", "policyDecision", "reviewStatus"
   ],
   "properties": {
     "patchId": { "type": "string", "pattern": "^rp_[A-Za-z0-9_-]+$" },
@@ -40,6 +40,24 @@
       "type": "array",
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
+    },
+    "claimAssessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "verdict", "evidenceRefs", "reason"],
+        "properties": {
+          "claim": { "type": "string", "minLength": 1 },
+          "verdict": { "enum": ["SUPPORTED", "UNSUPPORTED", "AMBIGUOUS"] },
+          "evidenceRefs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
     },
     "policyDecision": { "const": "ALLOW" },
     "reviewStatus": { "enum": ["PENDING", "ACCEPTED", "REJECTED", "EDITED"] }

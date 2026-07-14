@@ -53,6 +53,7 @@ public final class PatchPolicy {
                 assessment.newAtomicClaims(),
                 proposal.confidence(),
                 assessment.riskFlags(),
+                assessment.claims(),
                 PolicyDecision.ALLOW,
                 ReviewStatus.PENDING);
         return new PolicyEvaluation(

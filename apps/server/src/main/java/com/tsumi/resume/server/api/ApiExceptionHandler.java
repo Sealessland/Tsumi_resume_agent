@@ -3,15 +3,20 @@ package com.tsumi.resume.server.api;
 import com.tsumi.resume.domain.merge.PatchConflictException;
 import com.tsumi.resume.domain.merge.VersionConflictException;
 import com.tsumi.resume.task.TaskNotFoundException;
+import com.tsumi.resume.task.TaskCancelledException;
+import com.tsumi.resume.task.TaskNotRetryableException;
 import com.tsumi.resume.task.IdempotencyConflictException;
 import com.tsumi.resume.server.task.SseCursorInvalidException;
 import com.tsumi.resume.server.task.SseConnectionRejectedException;
+import com.tsumi.resume.server.review.A2uiPayloadLimitException;
 import com.tsumi.resume.workflow.resume.DuplicateResumeVersionException;
 import com.tsumi.resume.workflow.resume.ResumeVersionNotFoundException;
 import com.tsumi.resume.workflow.review.DuplicatePatchException;
 import com.tsumi.resume.workflow.review.NoAcceptedPatchesException;
 import com.tsumi.resume.workflow.review.PatchNotFoundException;
 import com.tsumi.resume.workflow.review.ReviewConflictException;
+import com.tsumi.resume.workflow.WorkflowExecutionException;
+import com.tsumi.resume.workflow.evidence.EvidenceNotApprovedException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -20,10 +25,42 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.UUID;
 
 @RestControllerAdvice
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class ApiExceptionHandler {
+    private static final Logger LOG = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    @ExceptionHandler(TaskNotRetryableException.class)
+    ProblemDetail handleTaskNotRetryable(TaskNotRetryableException exception) {
+        return problem(HttpStatus.CONFLICT, "Task is not retryable", exception.getMessage(),
+                "TASK_NOT_RETRYABLE", "Inspect the task failure and create a new task if needed.");
+    }
+
+    @ExceptionHandler(TaskCancelledException.class)
+    ProblemDetail handleTaskCancelled(TaskCancelledException exception) {
+        return problem(HttpStatus.CONFLICT, "Task is cancelled", exception.getMessage(),
+                "TASK_CANCELLED", "Create a new task; cancelled tasks cannot resume.");
+    }
+
+    @ExceptionHandler(EvidenceNotApprovedException.class)
+    ProblemDetail handleEvidenceNotApproved(EvidenceNotApprovedException exception) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Evidence is not approved", exception.getMessage(),
+                "EVIDENCE_NOT_APPROVED", "Approve valid task-scoped Evidence before retrying.");
+    }
+
+    @ExceptionHandler(WorkflowExecutionException.class)
+    ProblemDetail handleWorkflowExecution(WorkflowExecutionException exception) {
+        var status = exception.code().equals("WORKFLOW_TIMEOUT")
+                ? HttpStatus.GATEWAY_TIMEOUT : HttpStatus.UNPROCESSABLE_ENTITY;
+        var problem = problem(status, "Agent workflow failed", exception.getMessage(),
+                exception.code(), "Retry only when the response marks the failure retryable.");
+        problem.setProperty("retryable", exception.retryable());
+        return problem;
+    }
 
     @ExceptionHandler(IdempotencyConflictException.class)
     ProblemDetail handleIdempotencyConflict(IdempotencyConflictException exception) {
@@ -53,6 +90,16 @@ public class ApiExceptionHandler {
                 exception.getMessage(),
                 "SSE_CONNECTION_REJECTED",
                 "Close the existing stream or reconnect after capacity is available.");
+    }
+
+    @ExceptionHandler(A2uiPayloadLimitException.class)
+    ProblemDetail handleA2uiLimit(A2uiPayloadLimitException exception) {
+        return problem(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                "A2UI surface limit exceeded",
+                exception.getMessage(),
+                "A2UI_PAYLOAD_LIMIT",
+                "Reduce the number or size of review items before rendering.");
     }
 
     @ExceptionHandler(TaskNotFoundException.class)
@@ -173,6 +220,20 @@ public class ApiExceptionHandler {
                 exception.getMessage(),
                 "INVALID_ARGUMENT",
                 "Correct the request and retry.");
+    }
+
+    @ExceptionHandler(Exception.class)
+    ProblemDetail handleUnexpected(Exception exception) {
+        var traceId = "trace_" + UUID.randomUUID().toString().replace("-", "");
+        LOG.error("Unexpected API failure traceId={}", traceId, exception);
+        var problem = problem(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Internal server error",
+                "The request could not be completed.",
+                "INTERNAL_ERROR",
+                "Retry later and provide the traceId if the problem persists.");
+        problem.setProperty("traceId", traceId);
+        return problem;
     }
 
     private ProblemDetail problem(

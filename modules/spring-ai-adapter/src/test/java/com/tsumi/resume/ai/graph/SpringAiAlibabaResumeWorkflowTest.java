@@ -7,6 +7,7 @@ import com.tsumi.resume.domain.patch.PatchIntent;
 import com.tsumi.resume.domain.patch.PatchOperation;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.workflow.WorkflowInput;
+import com.tsumi.resume.workflow.review.CoverageGap;
 import com.tsumi.resume.workflow.WorkflowObserver;
 import com.tsumi.resume.task.WorkflowNode;
 import java.util.ArrayList;
@@ -60,7 +61,7 @@ class SpringAiAlibabaResumeWorkflowTest {
             }
             return new VerificationResult(proposals, List.of());
         };
-        VerifiedProposalSink sink = (taskId, proposals) -> calls.add("sink:" + proposals.size());
+        VerifiedProposalSink sink = (taskId, proposals, gaps) -> calls.add("sink:" + proposals.size());
 
         var workflow = new SpringAiAlibabaResumeWorkflow(
                 (resumeId, version) -> {
@@ -103,6 +104,7 @@ class SpringAiAlibabaResumeWorkflowTest {
                 }
                 """);
         var sinkCalls = new ArrayList<List<PatchProposal>>();
+        var gapCalls = new ArrayList<List<CoverageGap>>();
         StructuredResumeRewriter rewriter = request -> List.of(proposal(input, "，性能提升 50%"));
         WorkflowEvidenceVerifier alwaysReject = (workflowInput, proposals) -> new VerificationResult(
                 List.of(), List.of(new CoverageGap(
@@ -115,12 +117,19 @@ class SpringAiAlibabaResumeWorkflowTest {
                 rewriter,
                 (workflowInput, modelView, proposals) -> PrecheckResult.ready(proposals),
                 alwaysReject,
-                (taskId, proposals) -> sinkCalls.add(proposals));
+                (taskId, proposals, gaps) -> {
+                    sinkCalls.add(proposals);
+                    gapCalls.add(gaps);
+                });
 
         var result = workflow.execute(input);
 
         assertThat(result.summary()).isEqualTo("REVIEW_READY; proposals=0; gaps=1; repairs=1");
         assertThat(sinkCalls).containsExactly(List.of());
+        assertThat(gapCalls).singleElement().satisfies(gaps ->
+                assertThat(gaps).singleElement()
+                        .extracting(CoverageGap::unsupportedClaims)
+                        .isEqualTo(List.of("50%")));
     }
 
     private PatchProposal proposal(WorkflowInput input, String suffix) {

@@ -14,6 +14,14 @@
   "newAtomicClaims": ["导出耗时降低 50%"],
   "confidence": 0.99,
   "riskFlags": ["UNSUPPORTED_METRIC"],
+  "claimAssessments": [
+    {
+      "claim": "导出耗时降低 50%",
+      "verdict": "UNSUPPORTED",
+      "evidenceRefs": [],
+      "reason": "No approved evidence supports the metric."
+    }
+  ],
   "policyDecision": "REJECT",
   "reviewStatus": "PENDING"
 }

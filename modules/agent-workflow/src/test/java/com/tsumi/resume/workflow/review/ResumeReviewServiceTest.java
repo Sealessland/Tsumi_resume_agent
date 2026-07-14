@@ -120,6 +120,38 @@ class ResumeReviewServiceTest {
         assertThat(resumeStore.versions("res_fixture")).containsExactly(1L);
     }
 
+    @Test
+    void humanEditMustPassEvidenceGuardBeforeCreatingANewRevision() {
+        service.submit("task_01", proposal());
+        guardAssessment = new PatchAssessment(
+                0.0, List.of("性能提升 50%"), List.of("UNSUPPORTED_PROTECTED_FACT"));
+
+        var rejected = service.edit(
+                "task_01", "rp_01", 1,
+                "打通导出链路，性能提升 50%。");
+
+        assertThat(rejected.decision()).isEqualTo(PolicyDecision.REJECT);
+        assertThat(patchStore.find("task_01", "rp_01").orElseThrow().reviewStatus())
+                .isEqualTo(ReviewStatus.PENDING);
+        assertThat(patchStore.find("task_01", "rp_01_r2")).isEmpty();
+
+        guardAssessment = new PatchAssessment(1.0, List.of(), List.of());
+        var allowed = service.edit(
+                "task_01", "rp_01", 1,
+                "打通结构化编辑与导出链路。");
+
+        assertThat(allowed.decision()).isEqualTo(PolicyDecision.ALLOW);
+        assertThat(patchStore.find("task_01", "rp_01").orElseThrow().reviewStatus())
+                .isEqualTo(ReviewStatus.EDITED);
+        assertThat(patchStore.find("task_01", "rp_01_r2")).get().satisfies(revision -> {
+            assertThat(revision.after()).isEqualTo("打通结构化编辑与导出链路。");
+            assertThat(revision.reviewStatus()).isEqualTo(ReviewStatus.PENDING);
+        });
+        assertThat(taskEvents.findAfter("task_01", 0, 10))
+                .extracting(TaskEvent::type)
+                .containsExactly("patch.edited");
+    }
+
     private PatchProposal proposal() {
         return new PatchProposal(
                 "rp_01", "task_01", "res_fixture", 1,

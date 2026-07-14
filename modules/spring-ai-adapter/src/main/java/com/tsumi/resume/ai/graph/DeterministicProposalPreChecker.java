@@ -5,6 +5,7 @@ import com.tsumi.resume.domain.merge.ResumePathResolver;
 import com.tsumi.resume.domain.patch.PatchOperation;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.workflow.WorkflowInput;
+import com.tsumi.resume.workflow.review.CoverageGap;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

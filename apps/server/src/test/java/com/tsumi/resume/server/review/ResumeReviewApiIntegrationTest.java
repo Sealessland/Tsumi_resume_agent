@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.contains;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -97,6 +98,24 @@ class ResumeReviewApiIntegrationTest {
                 .andExpect(jsonPath("$.policyDecision").value("ALLOW"))
                 .andExpect(jsonPath("$.reviewStatus").value("PENDING"))
                 .andExpect(jsonPath("$.newAtomicClaims").isEmpty());
+
+        mockMvc.perform(get("/api/v1/tasks/{taskId}/review-surface", taskId)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.surfaceId").value("review_" + taskId + "_v1"))
+                .andExpect(jsonPath("$.patches[0].path").value("/projects/project_01/description"))
+                .andExpect(jsonPath("$.patches[0].before").value("实现简历编辑和导出功能。"))
+                .andExpect(jsonPath("$.patches[0].after").value("完成简历编辑和导出功能。"))
+                .andExpect(jsonPath("$.patches[0].evidence[0].artifactId").value("ev_api_flow"))
+                .andExpect(jsonPath("$.costSummary.estimatedCost").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/tasks/{taskId}/review-surface", taskId)
+                        .accept("application/a2ui+json"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("application/a2ui+json"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"version\":\"v0.9.1\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"createSurface\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"DiffCard\"")));
 
         mockMvc.perform(post(
                                 "/api/v1/tasks/{taskId}/patches/{patchId}/decision",

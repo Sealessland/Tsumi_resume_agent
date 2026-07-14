@@ -25,6 +25,8 @@ import com.tsumi.resume.workflow.resume.DuplicateResumeVersionException;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
 import com.tsumi.resume.workflow.resume.ResumeVersionStore;
 import com.tsumi.resume.workflow.review.PatchStore;
+import com.tsumi.resume.workflow.review.CoverageGap;
+import com.tsumi.resume.workflow.review.CoverageGapStore;
 import com.tsumi.resume.workflow.WorkflowRequest;
 import com.tsumi.resume.workflow.WorkflowRequestStore;
 import java.time.Instant;
@@ -57,6 +59,7 @@ class PersistentControlPlaneStoresTest {
     @Autowired private EvidenceArtifactStore evidence;
     @Autowired private IdempotencyStore idempotency;
     @Autowired private WorkflowRequestStore workflowRequests;
+    @Autowired private CoverageGapStore coverageGaps;
     @Autowired private ObjectMapper objectMapper;
 
     @Test
@@ -148,6 +151,21 @@ class PersistentControlPlaneStoresTest {
         workflowRequests.save(request);
 
         assertThat(workflowRequests.find("task_recovery_01")).contains(request);
+    }
+
+    @Test
+    void replacesCoverageGapDiagnosticsForAWorkflowAttempt() {
+        coverageGaps.replace("task_gap_01", List.of(new CoverageGap(
+                "rp_gap_01", "/projects/0/description",
+                List.of("性能提升 50%"), "Unsupported protected fact")));
+
+        assertThat(coverageGaps.findByTaskId("task_gap_01"))
+                .singleElement()
+                .extracting(CoverageGap::unsupportedClaims)
+                .isEqualTo(List.of("性能提升 50%"));
+
+        coverageGaps.replace("task_gap_01", List.of());
+        assertThat(coverageGaps.findByTaskId("task_gap_01")).isEmpty();
     }
 
     private ObjectNode resume(String resumeId, long version) {

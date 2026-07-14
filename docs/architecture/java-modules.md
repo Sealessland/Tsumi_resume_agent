@@ -19,13 +19,15 @@ agent-workflow -> task-runtime
 | --- | --- | --- |
 | `resume-domain` | PatchProposal、Policy Guard、ResumePatch、Patch Engine | Spring、NetworkNT、Controller、模型 SDK |
 | `task-runtime` | ResumeTask 聚合、显式状态转换、TaskRepository 端口 | HTTP、数据库实现、Agent SDK |
-| `agent-workflow` | TaskOrchestrator、ResumeAgentWorkflow 端口、版本与 Review/Merge 用例 | DashScope 配置、存储实现、Web DTO |
+| `agent-workflow` | 异步任务用例、ResumeAgentWorkflow 端口、Evidence Review、ReviewSurface | DashScope 配置、存储实现、Web DTO |
 | `infrastructure` | JSON Schema validator、内存仓储、本地确定性 workflow | REST API、业务状态跳转 |
+| `persistence-jpa` | JPA Entity/Adapter、Flyway、事务 UnitOfWork | 领域规则、Controller |
+| `spring-ai-adapter` | 固定 Spring AI Alibaba Graph、DashScope 结构化节点、PII 脱敏 | 自由路由、最终 Policy 决策 |
 | `apps/server` | Spring Boot 启动、Bean 装配、REST/ProblemDetail、Actuator | 领域规则、模型推理细节 |
 
-## 当前本地纵切
+## 当前 P0 纵切
 
-`POST /api/v1/resumes` 先用打包进可执行 jar 的共享 JSON Schema 验证 Resume AST，再注册不可变版本。`POST /api/v1/tasks` 经过 Jakarta Validation 后进入 `TaskOrchestrator`；Orchestrator 会先确认目标 Resume 版本存在，再按顺序持久化 `CREATED`、`RUNNING`、`REVIEW_REQUIRED`，并通过 `ResumeAgentWorkflow` 调用当前 adapter。`LocalDeterministicWorkflow` 只返回 `LOCAL_FAKE_READY_FOR_REVIEW`，不会生成 Patch 或新增简历事实。
+`POST /api/v1/tasks` 返回 `202`。本地执行器以数据库租约恢复任务，最多并行 2 个、排队 20 个；状态固定为 `CREATED → ANALYZING → PROPOSING → VERIFYING → REVIEW_READY → APPROVED → COMPLETED`。Graph 只传结构化 DTO，并在人审前 interrupt。
 
 模型输出使用独立的 `PatchProposal` 合同，不包含 `policyDecision` 或 `reviewStatus`。Proposal 先经过共享 Schema，`PatchPolicy` 再根据独立 `PatchAssessment` 生成服务器拥有的 `ResumePatch`；Policy 拒绝的 Proposal 永远不会写入 `PatchStore`。`ResumePatchEngine` 只合并 `ALLOW + ACCEPTED`、证据覆盖为 100%、不存在新增原子事实、版本和 before 值均匹配的 Patch。批量 merge 只创建一个新版本，稳定实体 ID 属于受保护字段。
 
@@ -33,18 +35,11 @@ agent-workflow -> task-runtime
 
 完整 HTTP 协议和 curl 流程见 [`../api/local-review-workflow.md`](../api/local-review-workflow.md)。
 
-## Spring AI Alibaba 接入位置
+## Spring AI Alibaba 与 Review Surface
 
-根 BOM 固定 Spring AI Alibaba `1.1.2.2` 与 Spring Boot `3.5.16` 兼容线。真实实现应新增 provider adapter 实现 `ResumeAgentWorkflow`，通过 profile 或配置替换 `LocalDeterministicWorkflow`。它只能返回类型化 workflow 结果，不能直接操作 Controller、TaskRepository 或前端 A2UI。
+根 BOM 固定 Spring AI Alibaba `1.1.2.2` 与 Spring Boot `3.5.16`。`spring-ai-adapter` 已实现固定 Graph；模型不能选择下一阶段，也不能决定 policyDecision。ReviewSurface 是协议无关领域模型，A2UI v0.9.1 由 server 的确定性白名单 Adapter 映射。
 
-后续接入顺序：
-
-1. 在 `agent-workflow` 定义 evidence/review 节点的结构化输入输出，并让 `PatchAssessment` 只来自受信任的 Evidence Guard 节点。
-2. 在 `infrastructure` 增加 Spring AI Alibaba Graph adapter。
-3. 通过固定 fake-model recording 测试工作流成功、超时、Policy 拒绝和人工中断。
-4. 再增加 PostgreSQL、RocketMQ LiteTopic、A2UI 与 sandbox adapters。
-
-当前本地 API 未启用认证，`PatchAssessment` 也仍由本地演示请求显式提供，因此不能直接作为公网信任边界；生产 profile 必须由受信任的 Evidence Guard 生成 assessment，并保护 Agent 写入端点。内存仓储会在进程退出时清空。这些是明确的后续 adapter 工作，不应被包装成已经完成。
+P0 明确不包含 RocketMQ、A2A、PDF/DOCX Worker、sandbox 和真实渲染 Worker；这些后续替换调度或工具 Adapter，不改变状态机和 Evidence 信任边界。
 
 ## 验证
 

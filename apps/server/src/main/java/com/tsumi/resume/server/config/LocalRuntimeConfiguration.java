@@ -3,6 +3,7 @@ package com.tsumi.resume.server.config;
 import com.tsumi.resume.infrastructure.contract.JsonContractValidator;
 import com.tsumi.resume.infrastructure.resume.InMemoryResumeVersionStore;
 import com.tsumi.resume.infrastructure.review.InMemoryPatchStore;
+import com.tsumi.resume.infrastructure.review.InMemoryCoverageGapStore;
 import com.tsumi.resume.infrastructure.task.InMemoryTaskRepository;
 import com.tsumi.resume.infrastructure.task.InMemoryTaskEventStore;
 import com.tsumi.resume.infrastructure.task.InMemoryIdempotencyStore;
@@ -25,6 +26,8 @@ import com.tsumi.resume.workflow.resume.ResumeVersionReader;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
 import com.tsumi.resume.workflow.review.PatchStore;
 import com.tsumi.resume.workflow.review.ResumeReviewService;
+import com.tsumi.resume.workflow.review.CoverageGapStore;
+import com.tsumi.resume.workflow.review.ReviewSurfaceService;
 import com.tsumi.resume.workflow.evidence.ClaimSupportEvaluator;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
 import com.tsumi.resume.workflow.evidence.EvidenceGuard;
@@ -98,6 +101,11 @@ public class LocalRuntimeConfiguration {
     }
 
     @Bean
+    CoverageGapStore coverageGapStore() {
+        return new InMemoryCoverageGapStore();
+    }
+
+    @Bean
     EvidenceArtifactStore evidenceArtifactStore() {
         return new InMemoryEvidenceArtifactStore();
     }
@@ -130,10 +138,21 @@ public class LocalRuntimeConfiguration {
             EvidenceArtifactStore evidenceStore,
             EvidenceGuard evidenceGuard,
             UnitOfWork unitOfWork,
-            TaskEventStore taskEvents) {
+            TaskEventStore taskEvents,
+            CoverageGapStore coverageGaps) {
         return new ResumeReviewService(
                 taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
-                unitOfWork, taskEvents);
+                unitOfWork, taskEvents, coverageGaps);
+    }
+
+    @Bean
+    ReviewSurfaceService reviewSurfaceService(
+            TaskRepository tasks,
+            PatchStore patches,
+            EvidenceArtifactStore evidence,
+            TaskEventStore events,
+            CoverageGapStore gaps) {
+        return new ReviewSurfaceService(tasks, patches, evidence, events, gaps);
     }
 
     @Bean("resumeContractValidator")

@@ -14,6 +14,7 @@ import com.tsumi.resume.task.TaskEvent;
 import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.task.TaskNotFoundException;
 import com.tsumi.resume.task.TaskRepository;
+import com.tsumi.resume.task.TaskStatus;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
 import com.tsumi.resume.workflow.UnitOfWork;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
@@ -32,6 +33,7 @@ public final class ResumeReviewService {
     private final EvidenceGuard evidenceGuard;
     private final UnitOfWork unitOfWork;
     private final TaskEventStore taskEvents;
+    private final CoverageGapStore coverageGaps;
     private final PatchPolicy patchPolicy = new PatchPolicy();
     private final ResumePatchEngine patchEngine = new ResumePatchEngine();
 
@@ -43,7 +45,7 @@ public final class ResumeReviewService {
             EvidenceArtifactStore evidenceStore,
             EvidenceGuard evidenceGuard) {
         this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
-                UnitOfWork.direct(), discardingEvents());
+                UnitOfWork.direct(), discardingEvents(), discardingGaps());
     }
 
     public ResumeReviewService(
@@ -55,7 +57,7 @@ public final class ResumeReviewService {
             EvidenceGuard evidenceGuard,
             TaskEventStore taskEvents) {
         this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
-                UnitOfWork.direct(), taskEvents);
+                UnitOfWork.direct(), taskEvents, discardingGaps());
     }
 
     public ResumeReviewService(
@@ -67,7 +69,7 @@ public final class ResumeReviewService {
             EvidenceGuard evidenceGuard,
             UnitOfWork unitOfWork) {
         this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
-                unitOfWork, discardingEvents());
+                unitOfWork, discardingEvents(), discardingGaps());
     }
 
     public ResumeReviewService(
@@ -79,6 +81,20 @@ public final class ResumeReviewService {
             EvidenceGuard evidenceGuard,
             UnitOfWork unitOfWork,
             TaskEventStore taskEvents) {
+        this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
+                unitOfWork, taskEvents, discardingGaps());
+    }
+
+    public ResumeReviewService(
+            TaskRepository taskRepository,
+            PatchStore patchStore,
+            VersionedResumeService resumeService,
+            Clock clock,
+            EvidenceArtifactStore evidenceStore,
+            EvidenceGuard evidenceGuard,
+            UnitOfWork unitOfWork,
+            TaskEventStore taskEvents,
+            CoverageGapStore coverageGaps) {
         this.taskRepository = taskRepository;
         this.patchStore = patchStore;
         this.resumeService = resumeService;
@@ -87,6 +103,7 @@ public final class ResumeReviewService {
         this.evidenceGuard = evidenceGuard;
         this.unitOfWork = unitOfWork;
         this.taskEvents = taskEvents;
+        this.coverageGaps = coverageGaps;
     }
 
     public PolicyEvaluation submit(String taskId, PatchProposal proposal) {
@@ -103,6 +120,25 @@ public final class ResumeReviewService {
         return evaluation;
     }
 
+    public void submitWorkflowResult(
+            String taskId,
+            List<PatchProposal> proposals,
+            List<CoverageGap> gaps) {
+        unitOfWork.execute(() -> {
+            task(taskId);
+            coverageGaps.replace(taskId, gaps);
+            for (var proposal : proposals) {
+                var evaluation = submit(taskId, proposal);
+                if (evaluation.decision()
+                        != com.tsumi.resume.domain.patch.PolicyDecision.ALLOW) {
+                    throw new ReviewConflictException(
+                            "Verified proposal failed policy re-check during persistence");
+                }
+            }
+            return null;
+        });
+    }
+
     public ResumePatch decide(
             String taskId,
             String patchId,
@@ -116,6 +152,42 @@ public final class ResumeReviewService {
             throw new VersionConflictException(patch.baseVersion(), expectedBaseVersion);
         }
         return patchStore.save(patch.reviewedAs(decision));
+    }
+
+    public PolicyEvaluation edit(
+            String taskId,
+            String patchId,
+            long expectedBaseVersion,
+            String after) {
+        if (after == null) throw new IllegalArgumentException("after must not be null");
+        return unitOfWork.execute(() -> {
+            var task = task(taskId);
+            requireExpectedVersion(task, expectedBaseVersion);
+            if (task.status() != TaskStatus.REVIEW_READY) {
+                throw new ReviewConflictException("Task is not ready for human review");
+            }
+            var original = patchStore.find(taskId, patchId)
+                    .orElseThrow(() -> new PatchNotFoundException(taskId, patchId));
+            if (original.reviewStatus() != ReviewStatus.PENDING) {
+                throw new ReviewConflictException("Only a pending patch can be edited");
+            }
+            var proposal = new PatchProposal(
+                    patchId + "_r2", original.taskId(), original.resumeId(), original.baseVersion(),
+                    original.op(), original.path(), original.before(), after, original.intent(),
+                    original.evidenceRefs(), original.jdRefs(), original.confidence());
+            var assessment = evidenceGuard.assess(
+                    task, proposal, evidenceStore.findByTaskId(taskId));
+            var evaluation = patchPolicy.evaluate(proposal, assessment);
+            evaluation.patch().ifPresent(revision -> {
+                patchStore.save(original.reviewedAs(ReviewStatus.EDITED));
+                patchStore.save(revision);
+                append(task, "patch.edited", Map.of(
+                        "originalPatchId", original.patchId(),
+                        "revisionPatchId", revision.patchId(),
+                        "path", revision.path()));
+            });
+            return evaluation;
+        });
     }
 
     public List<ResumePatch> patches(String taskId) {
@@ -181,6 +253,18 @@ public final class ResumeReviewService {
 
             @Override
             public List<TaskEvent> findAfter(String taskId, long afterExclusive, int limit) {
+                return List.of();
+            }
+        };
+    }
+
+    private static CoverageGapStore discardingGaps() {
+        return new CoverageGapStore() {
+            @Override
+            public void replace(String taskId, List<CoverageGap> gaps) {}
+
+            @Override
+            public List<CoverageGap> findByTaskId(String taskId) {
                 return List.of();
             }
         };

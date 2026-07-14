@@ -1,6 +1,7 @@
 package com.tsumi.resume.ai.graph;
 
 import com.tsumi.resume.workflow.WorkflowInput;
+import com.tsumi.resume.workflow.review.CoverageGap;
 import java.util.List;
 
 public record RewriteRequest(

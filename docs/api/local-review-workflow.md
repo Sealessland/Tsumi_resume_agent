@@ -1,113 +1,75 @@
-# 本地 Evidence-first Review/Merge API
+# Evidence-first Agent Review API
 
-这条纵向切片用于本地开发、自动化测试和比赛演示：导入不可变 Resume v1，创建 Agent 任务，提交候选 Patch，人工决定，最后原子合并为 v2。默认 workflow 是确定性 fake，不调用模型。
+后端采用模块化单体：任务异步执行固定 Graph，服务端 Evidence Guard 决定 Patch 是否可进入人工审核，浏览器和 Rewrite Agent 都不能提交 coverage 或 policyDecision。
 
-## 启动
+## 本地启动
 
 ```bash
 mvn -pl apps/server -am package
 java -jar apps/server/target/server-0.1.0-SNAPSHOT.jar
 ```
 
-## 1. 导入 Resume v1
+默认 `local` profile 使用文件型 H2（`./.data/tsumi-resume`）和确定性模型录制；`ai` 使用本地 H2 + DashScope；`prod` 使用外部 PostgreSQL + DashScope。生产密钥只从环境变量注入。
 
-```bash
-curl -i -X POST http://localhost:8080/api/v1/resumes \
-  -H 'Content-Type: application/json' \
-  --data-binary @contracts/fixtures/resume/valid-minimal-v13.json
-```
+## 主流程
 
-成功返回 `201`，`Location: /api/v1/resumes/res_fixture/versions/1`。同一 `resumeId + version` 不能覆盖，重复导入返回 `409 DUPLICATE_RESOURCE`。
+1. `POST /api/v1/resumes` 导入不可变 Resume v1。
+2. `POST /api/v1/tasks` 创建异步任务，必须携带 `Idempotency-Key`，返回 `202 CREATED` 和 `eventsUrl`。
+3. `GET /api/v1/tasks/{taskId}/events` 订阅 SSE；支持 `Last-Event-ID` 补发。
+4. 固定 Graph 执行 JD Analyst → Rewrite → deterministic pre-check → Evidence Guard → 最多一次修复。
+5. `GET /api/v1/tasks/{taskId}/review-surface` 获取可视化 Diff、Evidence、claim verdict、风险、Gap 和时间线。
+6. 使用 `ACCEPT / REJECT / EDIT` 人工审核；所有 mutation 必须携带 `Idempotency-Key`。
+7. `POST /api/v1/tasks/{taskId}/merge` 原子写入 Resume v2、APPROVED/COMPLETED 状态和事件。
 
-## 2. 创建任务
+创建任务示例：
 
 ```bash
 curl -i -X POST http://localhost:8080/api/v1/tasks \
+  -H 'Idempotency-Key: create-demo-01' \
   -H 'Content-Type: application/json' \
   -d '{"resumeId":"res_fixture","baseVersion":1,"jobDescription":"Java Agent Engineer"}'
 ```
 
-记录响应中的 `taskId`。本地 fake workflow 会让任务进入 `REVIEW_REQUIRED`；不存在的 Resume 版本返回 `404 RESUME_VERSION_NOT_FOUND`。
+## Review Surface 与 A2UI
 
-以下命令用实际值替换 `$TASK_ID`。
-
-## 3. 提交候选 Patch
+普通 JSON：
 
 ```bash
-curl -i -X POST "http://localhost:8080/api/v1/tasks/$TASK_ID/patch-proposals" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "proposal": {
-      "patchId": "rp_demo",
-      "taskId": "'$TASK_ID'",
-      "resumeId": "res_fixture",
-      "baseVersion": 1,
-      "op": "replace",
-      "path": "/projects/project_01/description",
-      "before": "实现简历编辑和导出功能。",
-      "after": "打通结构化编辑、实时预览及 PDF/PNG 导出链路。",
-      "intent": "PARAPHRASE",
-      "evidenceRefs": ["resume:projects/project_01"],
-      "jdRefs": ["jd:delivery/export"],
-      "confidence": 0.92
-    },
-    "assessment": {
-      "evidenceCoverage": 1.0,
-      "newAtomicClaims": [],
-      "riskFlags": []
-    }
-  }'
+curl -H 'Accept: application/json' \
+  "http://localhost:8080/api/v1/tasks/$TASK_ID/review-surface"
 ```
 
-成功返回服务器拥有的 `ResumePatch`，其初始状态一定是 `policyDecision=ALLOW`、`reviewStatus=PENDING`。如果 `evidenceRefs` 为空，Schema 返回 `422 CONTRACT_REJECTED`；如果 `newAtomicClaims` 非空或覆盖率不足，Policy 返回 `422 POLICY_REJECTED`，并且 Patch 不会落库。
-
-> 本地演示请求显式携带 `assessment`，便于在没有真实模型和 Evidence Guard 时测试完整用例。生产环境不能信任浏览器或外部 Agent 自报的 assessment，必须由受信任的服务器节点生成并保护该写入端点。
-
-## 4. 人工审核
+A2UI v0.9.1 JSONL 消息流：
 
 ```bash
-curl -i -X POST \
-  "http://localhost:8080/api/v1/tasks/$TASK_ID/patches/rp_demo/decision" \
-  -H 'Content-Type: application/json' \
-  -d '{"expectedBaseVersion":1,"decision":"ACCEPTED"}'
+curl -H 'Accept: application/a2ui+json' \
+  "http://localhost:8080/api/v1/tasks/$TASK_ID/review-surface"
 ```
 
-可用决定为 `ACCEPTED`、`REJECTED`、`EDITED`。决定是终态；重复决定返回 `409 REVIEW_CONFLICT`。`PENDING` 不能作为人工决定。
+A2UI 由确定性 Adapter 生成，catalog 固定为 `urn:tsumi:a2ui:resume-review:0.9.1`。仅允许 DiffCard、EvidenceList、RiskBadge、CoverageGap、ReviewActions、TaskTimeline、CostSummary；最多 100 个组件、256KB、8 层组件树。模型不能直接生成组件、HTML、JavaScript 或 action。
 
-## 5. 原子合并并查询 v2
+人工编辑：
 
 ```bash
-curl -i -X POST "http://localhost:8080/api/v1/tasks/$TASK_ID/merge" \
+curl -X POST \
+  "http://localhost:8080/api/v1/tasks/$TASK_ID/patches/$PATCH_ID/edit" \
+  -H 'Idempotency-Key: edit-demo-01' \
   -H 'Content-Type: application/json' \
-  -d '{"expectedBaseVersion":1}'
-
-curl http://localhost:8080/api/v1/resumes/res_fixture/versions
-curl http://localhost:8080/api/v1/resumes/res_fixture/versions/2
-curl "http://localhost:8080/api/v1/tasks/$TASK_ID"
+  -d '{"expectedBaseVersion":1,"after":"人工修改后的内容"}'
 ```
 
-merge 只读取 `ACCEPTED` Patch，校验版本、before 值、证据覆盖和受保护字段，再一次性生成 v2。成功后任务才会变成 `COMPLETED`。v1 保持不可变。
+EDIT 会重新运行服务端 Evidence Guard。只有所有 claim 都为 `SUPPORTED` 才创建新的 `_r2` Patch；原 Patch 标记为 `EDITED`。拒绝时不产生 revision，也不会显示可接受的占位 Patch。
 
-## 稳定错误码
+## 信任与数据约束
 
-| HTTP | code | 含义 |
-| --- | --- | --- |
-| 400 | `VALIDATION_ERROR` | Jakarta Validation 失败 |
-| 400 | `MALFORMED_JSON` | JSON 无法解析或枚举非法 |
-| 404 | `TASK_NOT_FOUND` | 任务不存在 |
-| 404 | `RESUME_VERSION_NOT_FOUND` | Resume 版本不存在 |
-| 404 | `PATCH_NOT_FOUND` | Patch 不存在 |
-| 409 | `DUPLICATE_RESOURCE` | 不可变版本或 Patch 重复 |
-| 409 | `VERSION_CONFLICT` | expectedBaseVersion 已过期 |
-| 409 | `REVIEW_CONFLICT` | 审核/合并状态冲突 |
-| 422 | `CONTRACT_REJECTED` | 共享 JSON Schema 拒绝 |
-| 422 | `POLICY_REJECTED` | 证据策略拒绝，Patch 不落库 |
+- `/patch-proposals` 仅在 `local-demo/test` profile 开放，且 Assessment 始终由服务端计算。
+- 新数字、百分比、日期、金额和专有名词若不在 before 或批准 Evidence 中，Patch 不落库。
+- 未获得权威价格时 `estimatedCost=null`；禁止推测 ATS、成本、性能或业务指标。
+- SSE payload 不包含简历全文、Prompt、密钥或签名 URL。
+- 模型调用前默认移除姓名、电话、邮箱、照片和地址。
 
-所有错误使用 `application/problem+json`，并包含 `code`、`retryable` 和 `nextAction`。
+## 关键错误码
 
-## 当前本地限制
+`IDEMPOTENCY_CONFLICT`、`VERSION_CONFLICT`、`TASK_NOT_RETRYABLE`、`TASK_CANCELLED`、`WORKFLOW_TIMEOUT`、`MODEL_OUTPUT_REJECTED`、`EVIDENCE_NOT_APPROVED`、`SSE_CURSOR_INVALID`、`POLICY_REJECTED`。
 
-- Resume、Task、Patch 使用进程内存仓储，重启即清空。
-- 未启用认证、限流和租户隔离，不能直接暴露公网。
-- `LocalDeterministicWorkflow` 不调用 Spring AI Alibaba 或外部模型。
-- 未启用 RocketMQ、PostgreSQL、对象存储或 sandbox。
+所有错误使用 RFC 7807。意外异常仅返回 traceId，不泄漏模型输出、SQL、PII 或凭据。

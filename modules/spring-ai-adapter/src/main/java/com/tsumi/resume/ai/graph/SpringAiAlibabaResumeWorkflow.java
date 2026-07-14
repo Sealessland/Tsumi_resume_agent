@@ -24,6 +24,7 @@ import com.tsumi.resume.workflow.WorkflowResult;
 import com.tsumi.resume.workflow.WorkflowExecutionException;
 import com.tsumi.resume.workflow.WorkflowObserver;
 import com.tsumi.resume.workflow.resume.ResumeVersionReader;
+import com.tsumi.resume.workflow.review.CoverageGap;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -225,7 +226,7 @@ public final class SpringAiAlibabaResumeWorkflow implements ResumeAgentWorkflow 
         var accepted = list(state, ACCEPTED, PatchProposal.class);
         var gaps = list(state, GAPS, CoverageGap.class);
         var repairs = required(state, REPAIR_COUNT, Integer.class);
-        sink.submit(input.taskId(), accepted);
+        sink.submit(input.taskId(), accepted, gaps);
         return Map.of(SUMMARY, "REVIEW_READY; proposals=%d; gaps=%d; repairs=%d"
                 .formatted(accepted.size(), gaps.size(), repairs));
     }
