@@ -1,6 +1,8 @@
 spring:
   application:
     name: tsumi-resume-orchestrator
+  profiles:
+    default: local
   jackson:
     deserialization:
       fail-on-unknown-properties: true
@@ -10,6 +12,8 @@ spring:
   threads:
     virtual:
       enabled: true
+  jpa:
+    open-in-view: false
 
 management:
   endpoints:

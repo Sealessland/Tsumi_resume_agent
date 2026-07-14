@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./.data/tsumi-resume;MODE=PostgreSQL;AUTO_SERVER=TRUE
+    username: sa
+    password:
+    hikari:
+      maximum-pool-size: 4
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  ai:
+    dashscope:
+      enabled: false
+      chat:
+        enabled: false
+
+tsumi:
+  ai:
+    mode: deterministic

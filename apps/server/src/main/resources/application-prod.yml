@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      maximum-pool-size: 4
+      minimum-idle: 1
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+
+tsumi:
+  ai:
+    node-timeout: 30s
+    max-output-tokens: 2000
+    analyst-model: ${ANALYST_MODEL:qwen-plus}
+    rewrite-model: ${REWRITE_MODEL:qwen-plus}
+    guard-model: ${GUARD_MODEL:qwen-plus}

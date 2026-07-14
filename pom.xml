@@ -16,6 +16,7 @@
     <module>modules/agent-workflow</module>
     <module>modules/infrastructure</module>
     <module>modules/persistence-jpa</module>
+    <module>modules/spring-ai-adapter</module>
   </modules>
 
   <properties>

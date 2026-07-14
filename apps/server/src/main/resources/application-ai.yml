@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./.data/tsumi-resume-ai;MODE=PostgreSQL;AUTO_SERVER=TRUE
+    username: sa
+    password:
+    hikari:
+      maximum-pool-size: 4
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen-plus
+
+tsumi:
+  ai:
+    node-timeout: 30s
+    max-output-tokens: 2000
+    analyst-model: qwen-plus
+    rewrite-model: qwen-plus
+    guard-model: qwen-plus
