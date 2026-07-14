@@ -1,7 +1,9 @@
 package com.tsumi.resume.ai.graph;
 
-public final class WorkflowModelTimeoutException extends RuntimeException {
+import com.tsumi.resume.workflow.WorkflowExecutionException;
+
+public final class WorkflowModelTimeoutException extends WorkflowExecutionException {
     public WorkflowModelTimeoutException(String node, Throwable cause) {
-        super("Model call timed out for " + node, cause);
+        super("WORKFLOW_TIMEOUT", true, "Model call timed out for " + node, cause);
     }
 }

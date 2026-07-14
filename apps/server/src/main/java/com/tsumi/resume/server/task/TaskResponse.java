@@ -16,6 +16,7 @@ public record TaskResponse(
         int repairCount,
         String traceId,
         long revision,
+        String eventsUrl,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -32,6 +33,7 @@ public record TaskResponse(
                 task.repairCount(),
                 task.traceId(),
                 task.revision(),
+                "/api/v1/tasks/" + task.taskId() + "/events",
                 task.createdAt(),
                 task.updatedAt());
     }

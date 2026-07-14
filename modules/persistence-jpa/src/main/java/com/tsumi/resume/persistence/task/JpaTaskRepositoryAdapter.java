@@ -4,6 +4,10 @@ import com.tsumi.resume.task.ResumeTask;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.task.TaskVersionConflictException;
 import java.util.Optional;
+import java.time.Instant;
+import java.util.List;
+import com.tsumi.resume.task.TaskStatus;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
 public class JpaTaskRepositoryAdapter implements TaskRepository {
@@ -42,5 +46,17 @@ public class JpaTaskRepositoryAdapter implements TaskRepository {
     @Transactional(readOnly = true)
     public Optional<ResumeTask> findById(String taskId) {
         return repository.findById(taskId).map(TaskEntity::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ResumeTask> findRecoverable(Instant now, int limit) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid recovery limit");
+        return repository.findRecoverable(
+                        List.of(TaskStatus.CREATED, TaskStatus.ANALYZING,
+                                TaskStatus.PROPOSING, TaskStatus.VERIFYING),
+                        now,
+                        PageRequest.of(0, limit))
+                .stream().map(TaskEntity::toDomain).toList();
     }
 }

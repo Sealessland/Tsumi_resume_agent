@@ -8,6 +8,7 @@ import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tsumi.resume.domain.evidence.EvidenceArtifact;
 import com.tsumi.resume.workflow.WorkflowInput;
+import com.tsumi.resume.workflow.WorkflowExecutionException;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
 import java.time.Clock;
 import java.time.Duration;
@@ -16,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -59,6 +61,7 @@ class DashScopeStructuredNodesTest {
 
         assertThatThrownBy(() -> new DashScopeJdAnalyst(client, "qwen-plus").analyze("Java"))
                 .isInstanceOf(ModelOutputRejectedException.class)
+                .isInstanceOf(WorkflowExecutionException.class)
                 .hasMessageContaining("jd_analyst");
     }
 
@@ -103,6 +106,26 @@ class DashScopeStructuredNodesTest {
                 .doesNotContain("evidence_02", "过期材料");
         assertThat(((DashScopeChatOptions) model.prompts.getFirst().getOptions()).getTemperature())
                 .isEqualTo(0.2);
+    }
+
+    @Test
+    void retriesProviderFailureOnlyOnceAndReturnsSanitizedRetryableCode() {
+        var attempts = new AtomicInteger();
+        ChatModel unavailable = prompt -> {
+            attempts.incrementAndGet();
+            throw new IllegalStateException("provider secret response");
+        };
+        var client = new DashScopeStructuredModelClient(
+                unavailable, new ObjectMapper(), Duration.ofSeconds(1), 1_000);
+
+        assertThatThrownBy(() -> new DashScopeJdAnalyst(client, "qwen-plus").analyze("Java"))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .satisfies(error -> {
+                    var controlled = (WorkflowExecutionException) error;
+                    assertThat(controlled.code()).isEqualTo("MODEL_PROVIDER_UNAVAILABLE");
+                    assertThat(controlled.retryable()).isTrue();
+                });
+        assertThat(attempts).hasValue(2);
     }
 
     private static final class RecordingChatModel implements ChatModel {

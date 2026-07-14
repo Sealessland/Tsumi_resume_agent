@@ -9,6 +9,9 @@ import com.tsumi.resume.domain.policy.PatchPolicy;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.domain.policy.PolicyEvaluation;
 import com.tsumi.resume.task.ResumeTask;
+import com.tsumi.resume.task.NewTaskEvent;
+import com.tsumi.resume.task.TaskEvent;
+import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.task.TaskNotFoundException;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
@@ -17,6 +20,7 @@ import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
 import com.tsumi.resume.workflow.evidence.EvidenceGuard;
 import java.time.Clock;
 import java.util.List;
+import java.util.Map;
 
 public final class ResumeReviewService {
 
@@ -27,6 +31,7 @@ public final class ResumeReviewService {
     private final EvidenceArtifactStore evidenceStore;
     private final EvidenceGuard evidenceGuard;
     private final UnitOfWork unitOfWork;
+    private final TaskEventStore taskEvents;
     private final PatchPolicy patchPolicy = new PatchPolicy();
     private final ResumePatchEngine patchEngine = new ResumePatchEngine();
 
@@ -37,7 +42,20 @@ public final class ResumeReviewService {
             Clock clock,
             EvidenceArtifactStore evidenceStore,
             EvidenceGuard evidenceGuard) {
-        this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard, UnitOfWork.direct());
+        this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
+                UnitOfWork.direct(), discardingEvents());
+    }
+
+    public ResumeReviewService(
+            TaskRepository taskRepository,
+            PatchStore patchStore,
+            VersionedResumeService resumeService,
+            Clock clock,
+            EvidenceArtifactStore evidenceStore,
+            EvidenceGuard evidenceGuard,
+            TaskEventStore taskEvents) {
+        this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
+                UnitOfWork.direct(), taskEvents);
     }
 
     public ResumeReviewService(
@@ -48,6 +66,19 @@ public final class ResumeReviewService {
             EvidenceArtifactStore evidenceStore,
             EvidenceGuard evidenceGuard,
             UnitOfWork unitOfWork) {
+        this(taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
+                unitOfWork, discardingEvents());
+    }
+
+    public ResumeReviewService(
+            TaskRepository taskRepository,
+            PatchStore patchStore,
+            VersionedResumeService resumeService,
+            Clock clock,
+            EvidenceArtifactStore evidenceStore,
+            EvidenceGuard evidenceGuard,
+            UnitOfWork unitOfWork,
+            TaskEventStore taskEvents) {
         this.taskRepository = taskRepository;
         this.patchStore = patchStore;
         this.resumeService = resumeService;
@@ -55,6 +86,7 @@ public final class ResumeReviewService {
         this.evidenceStore = evidenceStore;
         this.evidenceGuard = evidenceGuard;
         this.unitOfWork = unitOfWork;
+        this.taskEvents = taskEvents;
     }
 
     public PolicyEvaluation submit(String taskId, PatchProposal proposal) {
@@ -121,8 +153,37 @@ public final class ResumeReviewService {
         var base = resumeService.get(task.resumeId(), expectedBaseVersion);
         var merged = patchEngine.applyAll(base, accepted);
         var saved = resumeService.register(merged);
-        taskRepository.save(task.approve(clock.instant()).complete(clock.instant()));
+        var approved = taskRepository.save(task.approve(clock.instant()));
+        append(approved, "task.approved", Map.of(
+                "resumeId", approved.resumeId(),
+                "baseVersion", Long.toString(approved.baseVersion())));
+        var completed = taskRepository.save(approved.complete(clock.instant()));
+        append(completed, "task.completed", Map.of(
+                "resumeId", completed.resumeId(),
+                "version", saved.path("version").asText()));
         return saved;
+    }
+
+    private void append(ResumeTask task, String type, Map<String, String> data) {
+        taskEvents.append(new NewTaskEvent(
+                task.taskId(), type, task.status(), task.attempt(), task.traceId(),
+                clock.instant(), data));
+    }
+
+    private static TaskEventStore discardingEvents() {
+        return new TaskEventStore() {
+            @Override
+            public TaskEvent append(NewTaskEvent event) {
+                return new TaskEvent(
+                        1, event.taskId(), event.type(), event.stage(), event.attempt(),
+                        event.traceId(), event.occurredAt(), event.data());
+            }
+
+            @Override
+            public List<TaskEvent> findAfter(String taskId, long afterExclusive, int limit) {
+                return List.of();
+            }
+        };
     }
 
     private ResumeTask task(String taskId) {

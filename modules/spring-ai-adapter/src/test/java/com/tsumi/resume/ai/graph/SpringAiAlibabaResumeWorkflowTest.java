@@ -7,6 +7,8 @@ import com.tsumi.resume.domain.patch.PatchIntent;
 import com.tsumi.resume.domain.patch.PatchOperation;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.workflow.WorkflowInput;
+import com.tsumi.resume.workflow.WorkflowObserver;
+import com.tsumi.resume.task.WorkflowNode;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -67,12 +69,25 @@ class SpringAiAlibabaResumeWorkflowTest {
                 },
                 new ResumeModelSanitizer(), analyst, rewriter, preChecker, verifier, sink);
 
-        var result = workflow.execute(input);
+        var observed = new ArrayList<String>();
+        var result = workflow.execute(input, new WorkflowObserver() {
+            @Override public void nodeStarted(WorkflowNode node) { observed.add("start:" + node); }
+            @Override public void nodeCompleted(WorkflowNode node, long durationMillis) { observed.add("done:" + node); }
+            @Override public void nodeFailed(WorkflowNode node, String errorCode, long durationMillis) {
+                observed.add("failed:" + node);
+            }
+        });
 
         assertThat(calls).containsExactly(
                 "load", "analyze", "rewrite:initial", "precheck", "verify",
                 "rewrite:repair", "precheck", "verify", "sink:1");
         assertThat(result.summary()).isEqualTo("REVIEW_READY; proposals=1; gaps=0; repairs=1");
+        assertThat(observed).containsSubsequence(
+                "start:JD_ANALYST", "done:JD_ANALYST",
+                "start:REWRITE_AGENT", "done:REWRITE_AGENT",
+                "start:EVIDENCE_GUARD", "done:EVIDENCE_GUARD",
+                "start:REPAIR_AGENT", "done:REPAIR_AGENT",
+                "start:REVIEW_AGGREGATOR", "done:REVIEW_AGGREGATOR");
         assertThat(workflow.snapshot(input.taskId()).next()).isEqualTo("human_review");
     }
 

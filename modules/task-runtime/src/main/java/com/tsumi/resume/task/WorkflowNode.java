@@ -6,5 +6,6 @@ public enum WorkflowNode {
     REWRITE_AGENT,
     DETERMINISTIC_PRECHECK,
     EVIDENCE_GUARD,
+    REPAIR_AGENT,
     REVIEW_AGGREGATOR
 }

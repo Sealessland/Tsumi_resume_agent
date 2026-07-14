@@ -4,13 +4,22 @@ import com.tsumi.resume.infrastructure.contract.JsonContractValidator;
 import com.tsumi.resume.infrastructure.resume.InMemoryResumeVersionStore;
 import com.tsumi.resume.infrastructure.review.InMemoryPatchStore;
 import com.tsumi.resume.infrastructure.task.InMemoryTaskRepository;
+import com.tsumi.resume.infrastructure.task.InMemoryTaskEventStore;
+import com.tsumi.resume.infrastructure.task.InMemoryIdempotencyStore;
 import com.tsumi.resume.infrastructure.workflow.LocalDeterministicWorkflow;
+import com.tsumi.resume.infrastructure.workflow.InMemoryWorkflowRequestStore;
+import com.tsumi.resume.infrastructure.workflow.InMemoryWorkflowCheckpointStore;
 import com.tsumi.resume.infrastructure.evidence.InMemoryEvidenceArtifactStore;
 import com.tsumi.resume.domain.evidence.ClaimAssessment;
 import com.tsumi.resume.domain.evidence.ClaimVerdict;
 import com.tsumi.resume.task.TaskRepository;
+import com.tsumi.resume.task.TaskEventStore;
+import com.tsumi.resume.task.IdempotencyStore;
+import com.tsumi.resume.task.WorkflowCheckpointStore;
 import com.tsumi.resume.workflow.ResumeAgentWorkflow;
 import com.tsumi.resume.workflow.TaskOrchestrator;
+import com.tsumi.resume.workflow.UnitOfWork;
+import com.tsumi.resume.workflow.WorkflowRequestStore;
 import com.tsumi.resume.workflow.resume.ResumeVersionStore;
 import com.tsumi.resume.workflow.resume.ResumeVersionReader;
 import com.tsumi.resume.workflow.resume.VersionedResumeService;
@@ -36,6 +45,31 @@ public class LocalRuntimeConfiguration {
     @Bean
     TaskRepository taskRepository() {
         return new InMemoryTaskRepository();
+    }
+
+    @Bean
+    TaskEventStore taskEventStore() {
+        return new InMemoryTaskEventStore();
+    }
+
+    @Bean
+    IdempotencyStore idempotencyStore() {
+        return new InMemoryIdempotencyStore();
+    }
+
+    @Bean
+    WorkflowRequestStore workflowRequestStore() {
+        return new InMemoryWorkflowRequestStore();
+    }
+
+    @Bean
+    WorkflowCheckpointStore workflowCheckpointStore() {
+        return new InMemoryWorkflowCheckpointStore();
+    }
+
+    @Bean
+    UnitOfWork unitOfWork() {
+        return UnitOfWork.direct();
     }
 
     @Bean
@@ -94,9 +128,12 @@ public class LocalRuntimeConfiguration {
             VersionedResumeService resumeService,
             Clock clock,
             EvidenceArtifactStore evidenceStore,
-            EvidenceGuard evidenceGuard) {
+            EvidenceGuard evidenceGuard,
+            UnitOfWork unitOfWork,
+            TaskEventStore taskEvents) {
         return new ResumeReviewService(
-                taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard);
+                taskRepository, patchStore, resumeService, clock, evidenceStore, evidenceGuard,
+                unitOfWork, taskEvents);
     }
 
     @Bean("resumeContractValidator")

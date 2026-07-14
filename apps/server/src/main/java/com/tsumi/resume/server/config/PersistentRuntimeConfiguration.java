@@ -3,6 +3,7 @@ package com.tsumi.resume.server.config;
 import com.tsumi.resume.infrastructure.contract.JsonContractValidator;
 import com.tsumi.resume.persistence.config.PersistenceJpaConfiguration;
 import com.tsumi.resume.task.TaskRepository;
+import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.workflow.ResumeAgentWorkflow;
 import com.tsumi.resume.workflow.TaskOrchestrator;
 import com.tsumi.resume.workflow.UnitOfWork;
@@ -55,10 +56,11 @@ public class PersistentRuntimeConfiguration {
             Clock clock,
             EvidenceArtifactStore evidenceStore,
             EvidenceGuard evidenceGuard,
-            UnitOfWork unitOfWork) {
+            UnitOfWork unitOfWork,
+            TaskEventStore taskEvents) {
         return new ResumeReviewService(
                 taskRepository, patchStore, resumeService, clock,
-                evidenceStore, evidenceGuard, unitOfWork);
+                evidenceStore, evidenceGuard, unitOfWork, taskEvents);
     }
 
     @Bean

@@ -3,6 +3,9 @@ package com.tsumi.resume.server.api;
 import com.tsumi.resume.domain.merge.PatchConflictException;
 import com.tsumi.resume.domain.merge.VersionConflictException;
 import com.tsumi.resume.task.TaskNotFoundException;
+import com.tsumi.resume.task.IdempotencyConflictException;
+import com.tsumi.resume.server.task.SseCursorInvalidException;
+import com.tsumi.resume.server.task.SseConnectionRejectedException;
 import com.tsumi.resume.workflow.resume.DuplicateResumeVersionException;
 import com.tsumi.resume.workflow.resume.ResumeVersionNotFoundException;
 import com.tsumi.resume.workflow.review.DuplicatePatchException;
@@ -21,6 +24,36 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    ProblemDetail handleIdempotencyConflict(IdempotencyConflictException exception) {
+        return problem(
+                HttpStatus.CONFLICT,
+                "Idempotency conflict",
+                exception.getMessage(),
+                "IDEMPOTENCY_CONFLICT",
+                "Use the original request payload or a new Idempotency-Key.");
+    }
+
+    @ExceptionHandler(SseCursorInvalidException.class)
+    ProblemDetail handleSseCursor(SseCursorInvalidException exception) {
+        return problem(
+                HttpStatus.BAD_REQUEST,
+                "Invalid SSE cursor",
+                exception.getMessage(),
+                "SSE_CURSOR_INVALID",
+                "Reconnect without Last-Event-ID to replay this task stream from the beginning.");
+    }
+
+    @ExceptionHandler(SseConnectionRejectedException.class)
+    ProblemDetail handleSseConnection(SseConnectionRejectedException exception) {
+        return problem(
+                exception.capacity() ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.CONFLICT,
+                "SSE connection rejected",
+                exception.getMessage(),
+                "SSE_CONNECTION_REJECTED",
+                "Close the existing stream or reconnect after capacity is available.");
+    }
 
     @ExceptionHandler(TaskNotFoundException.class)
     ProblemDetail handleTaskNotFound(TaskNotFoundException exception) {

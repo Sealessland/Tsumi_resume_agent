@@ -14,6 +14,7 @@ import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.persistence.config.PersistenceJpaConfiguration;
 import com.tsumi.resume.task.ResumeTask;
 import com.tsumi.resume.task.TaskRepository;
+import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.task.TaskStatus;
 import com.tsumi.resume.workflow.UnitOfWork;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
@@ -43,6 +44,7 @@ class AtomicMergeTransactionTest {
     @Autowired ResumeVersionStore resumes;
     @Autowired PatchStore patches;
     @Autowired EvidenceArtifactStore evidence;
+    @Autowired TaskEventStore taskEvents;
     @Autowired UnitOfWork unitOfWork;
     @Autowired ObjectMapper json;
 
@@ -70,7 +72,7 @@ class AtomicMergeTransactionTest {
             public Optional<ResumeTask> findById(String id) { return tasks.findById(id); }
         };
         var service = new ResumeReviewService(failing, patches, versioned,
-                Clock.fixed(NOW, ZoneOffset.UTC), evidence, guard, unitOfWork);
+                Clock.fixed(NOW, ZoneOffset.UTC), evidence, guard, unitOfWork, taskEvents);
         var proposal = new PatchProposal("patch_tx_01", ready.taskId(), ready.resumeId(), 1,
                 PatchOperation.REPLACE, "/basics/summary", "Built export workflow",
                 "Completed export workflow", PatchIntent.PARAPHRASE,
@@ -81,6 +83,7 @@ class AtomicMergeTransactionTest {
         assertThatThrownBy(() -> service.merge(ready.taskId(), 1)).hasMessage("injected failure");
         assertThat(resumes.versions(ready.resumeId())).containsExactly(1L);
         assertThat(tasks.findById(ready.taskId()).orElseThrow().status()).isEqualTo(TaskStatus.REVIEW_READY);
+        assertThat(taskEvents.findAfter(ready.taskId(), 0, 10)).isEmpty();
     }
 
     @SpringBootConfiguration @EnableAutoConfiguration @Import(PersistenceJpaConfiguration.class)

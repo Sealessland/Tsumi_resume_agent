@@ -9,6 +9,7 @@ import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.task.TaskStatus;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +39,10 @@ public class JpaTaskEventStore implements TaskEventStore {
         return repository.findByTaskIdAndEventIdGreaterThanOrderByEventIdAsc(
                         taskId, afterExclusive, PageRequest.of(0, limit)).stream()
                 .map(this::toDomain).toList();
+    }
+    @Override @Transactional(readOnly = true)
+    public Optional<TaskEvent> findById(long eventId) {
+        return repository.findById(eventId).map(this::toDomain);
     }
     private TaskEvent toDomain(TaskEventEntity entity) {
         try {

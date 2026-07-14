@@ -3,7 +3,6 @@ package com.tsumi.resume.ai.graph;
 import static com.alibaba.cloud.ai.graph.StateGraph.END;
 import static com.alibaba.cloud.ai.graph.StateGraph.START;
 import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
-import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
 
 import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
@@ -15,10 +14,15 @@ import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.state.StateSnapshot;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
+import com.alibaba.cloud.ai.graph.action.AsyncNodeActionWithConfig;
+import com.alibaba.cloud.ai.graph.action.NodeAction;
+import com.tsumi.resume.task.WorkflowNode;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.workflow.ResumeAgentWorkflow;
 import com.tsumi.resume.workflow.WorkflowInput;
 import com.tsumi.resume.workflow.WorkflowResult;
+import com.tsumi.resume.workflow.WorkflowExecutionException;
+import com.tsumi.resume.workflow.WorkflowObserver;
 import com.tsumi.resume.workflow.resume.ResumeVersionReader;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -49,6 +53,7 @@ public final class SpringAiAlibabaResumeWorkflow implements ResumeAgentWorkflow 
     private static final String GAPS = "coverageGaps";
     private static final String REPAIR_COUNT = "repairCount";
     private static final String SUMMARY = "summary";
+    private static final String OBSERVER = "workflowObserver";
 
     private final ResumeVersionReader resumes;
     private final ResumeModelSanitizer sanitizer;
@@ -79,12 +84,20 @@ public final class SpringAiAlibabaResumeWorkflow implements ResumeAgentWorkflow 
 
     @Override
     public WorkflowResult execute(WorkflowInput input) {
-        var config = RunnableConfig.builder().threadId(input.taskId()).build();
+        return execute(input, WorkflowObserver.noop());
+    }
+
+    @Override
+    public WorkflowResult execute(WorkflowInput input, WorkflowObserver observer) {
+        var config = RunnableConfig.builder()
+                .threadId(input.taskId())
+                .addMetadata(OBSERVER, observer)
+                .build();
         graph.stream(Map.of(
                         INPUT, input,
                         ACCEPTED, List.of(),
                         GAPS, List.of(),
-                        REPAIR_COUNT, 0), config)
+                        REPAIR_COUNT, input.repairCount()), config)
                 .blockLast();
         var snapshot = graph.getState(config);
         var summary = snapshot.state().value(SUMMARY, String.class)
@@ -103,14 +116,14 @@ public final class SpringAiAlibabaResumeWorkflow implements ResumeAgentWorkflow 
         var saver = MemorySaver.builder().build();
         try {
             return new StateGraph("tsumi-resume-review", strategies.build())
-                    .addNode(LOAD_RESUME, node_async(this::loadResume))
-                    .addNode(JD_ANALYST, node_async(this::analyzeJd))
-                    .addNode(REWRITE_AGENT, node_async(state -> rewrite(state, false)))
-                    .addNode(PRECHECK, node_async(this::precheck))
-                    .addNode(EVIDENCE_GUARD, node_async(this::verifyEvidence))
-                    .addNode(REPAIR_AGENT, node_async(state -> rewrite(state, true)))
-                    .addNode(AGGREGATE, node_async(this::aggregate))
-                    .addNode(HUMAN_REVIEW, node_async(state -> Map.of()))
+                    .addNode(LOAD_RESUME, observed(WorkflowNode.LOAD_RESUME, this::loadResume))
+                    .addNode(JD_ANALYST, observed(WorkflowNode.JD_ANALYST, this::analyzeJd))
+                    .addNode(REWRITE_AGENT, observed(WorkflowNode.REWRITE_AGENT, state -> rewrite(state, false)))
+                    .addNode(PRECHECK, observed(WorkflowNode.DETERMINISTIC_PRECHECK, this::precheck))
+                    .addNode(EVIDENCE_GUARD, observed(WorkflowNode.EVIDENCE_GUARD, this::verifyEvidence))
+                    .addNode(REPAIR_AGENT, observed(WorkflowNode.REPAIR_AGENT, state -> rewrite(state, true)))
+                    .addNode(AGGREGATE, observed(WorkflowNode.REVIEW_AGGREGATOR, this::aggregate))
+                    .addNode(HUMAN_REVIEW, AsyncNodeActionWithConfig.node_async((state, config) -> Map.of()))
                     .addEdge(START, LOAD_RESUME)
                     .addEdge(LOAD_RESUME, JD_ANALYST)
                     .addEdge(JD_ANALYST, REWRITE_AGENT)
@@ -129,6 +142,32 @@ public final class SpringAiAlibabaResumeWorkflow implements ResumeAgentWorkflow 
         } catch (Exception exception) {
             throw new IllegalStateException("Cannot compile fixed resume workflow graph", exception);
         }
+    }
+
+    private AsyncNodeActionWithConfig observed(WorkflowNode node, NodeAction action) {
+        return AsyncNodeActionWithConfig.node_async((state, config) -> {
+            var observer = config.metadata(OBSERVER)
+                    .filter(WorkflowObserver.class::isInstance)
+                    .map(WorkflowObserver.class::cast)
+                    .orElseGet(WorkflowObserver::noop);
+            var started = System.nanoTime();
+            observer.nodeStarted(node);
+            try {
+                var result = action.apply(state);
+                observer.nodeCompleted(node, elapsedMillis(started));
+                return result;
+            } catch (Exception exception) {
+                var code = exception instanceof WorkflowExecutionException controlled
+                        ? controlled.code() : "NODE_EXECUTION_FAILED";
+                observer.nodeFailed(node, code, elapsedMillis(started));
+                throw exception;
+            }
+        });
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0, java.util.concurrent.TimeUnit.NANOSECONDS
+                .toMillis(System.nanoTime() - startedNanos));
     }
 
     private Map<String, Object> loadResume(OverAllState state) {

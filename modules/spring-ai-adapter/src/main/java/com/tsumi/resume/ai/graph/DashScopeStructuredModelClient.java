@@ -10,6 +10,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import com.tsumi.resume.workflow.WorkflowExecutionException;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -84,7 +85,10 @@ public final class DashScopeStructuredModelClient {
                 lastFailure = exception;
             }
         }
-        throw lastFailure;
+        if (lastFailure instanceof WorkflowExecutionException controlled) throw controlled;
+        throw new WorkflowExecutionException(
+                "MODEL_PROVIDER_UNAVAILABLE", true,
+                "Model provider remained unavailable after one retry", lastFailure);
     }
 
     private String invokeWithTimeout(String node, Prompt prompt) {

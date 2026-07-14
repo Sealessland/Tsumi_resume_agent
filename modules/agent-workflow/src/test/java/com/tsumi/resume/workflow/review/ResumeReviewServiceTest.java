@@ -14,6 +14,9 @@ import com.tsumi.resume.domain.patch.ReviewStatus;
 import com.tsumi.resume.domain.policy.PatchAssessment;
 import com.tsumi.resume.domain.policy.PatchProposal;
 import com.tsumi.resume.task.ResumeTask;
+import com.tsumi.resume.task.NewTaskEvent;
+import com.tsumi.resume.task.TaskEvent;
+import com.tsumi.resume.task.TaskEventStore;
 import com.tsumi.resume.task.TaskRepository;
 import com.tsumi.resume.task.TaskStatus;
 import com.tsumi.resume.workflow.resume.ResumeVersionStore;
@@ -39,6 +42,7 @@ class ResumeReviewServiceTest {
     private final MemoryResumeStore resumeStore = new MemoryResumeStore();
     private final MemoryPatchStore patchStore = new MemoryPatchStore();
     private final MemoryTaskRepository taskRepository = new MemoryTaskRepository();
+    private final MemoryTaskEventStore taskEvents = new MemoryTaskEventStore();
     private PatchAssessment guardAssessment;
     private ResumeReviewService service;
 
@@ -60,7 +64,8 @@ class ResumeReviewServiceTest {
                 new VersionedResumeService(resumeStore),
                 Clock.fixed(Instant.parse("2026-07-13T00:00:05Z"), ZoneOffset.UTC),
                 new EmptyEvidenceStore(),
-                (task, proposal, evidence) -> guardAssessment);
+                (task, proposal, evidence) -> guardAssessment,
+                taskEvents);
     }
 
     @Test
@@ -86,6 +91,12 @@ class ResumeReviewServiceTest {
         assertThat(resumeStore.versions("res_fixture")).containsExactly(1L, 2L);
         assertThat(taskRepository.findById("task_01").orElseThrow().status())
                 .isEqualTo(TaskStatus.COMPLETED);
+        assertThat(taskEvents.findAfter("task_01", 0, 10))
+                .extracting(TaskEvent::type)
+                .containsExactly("task.approved", "task.completed");
+        assertThat(taskEvents.findAfter("task_01", 0, 10))
+                .extracting(TaskEvent::stage)
+                .containsExactly(TaskStatus.APPROVED, TaskStatus.COMPLETED);
     }
 
     @Test
@@ -188,5 +199,33 @@ class ResumeReviewServiceTest {
         @Override public EvidenceArtifact save(EvidenceArtifact artifact) { return artifact; }
         @Override public Optional<EvidenceArtifact> findById(String artifactId) { return Optional.empty(); }
         @Override public List<EvidenceArtifact> findByTaskId(String taskId) { return List.of(); }
+    }
+
+    private static final class MemoryTaskEventStore implements TaskEventStore {
+        private final List<TaskEvent> events = new ArrayList<>();
+
+        @Override
+        public TaskEvent append(NewTaskEvent event) {
+            var saved = new TaskEvent(
+                    events.size() + 1L,
+                    event.taskId(),
+                    event.type(),
+                    event.stage(),
+                    event.attempt(),
+                    event.traceId(),
+                    event.occurredAt(),
+                    event.data());
+            events.add(saved);
+            return saved;
+        }
+
+        @Override
+        public List<TaskEvent> findAfter(String taskId, long afterExclusive, int limit) {
+            return events.stream()
+                    .filter(event -> event.taskId().equals(taskId))
+                    .filter(event -> event.eventId() > afterExclusive)
+                    .limit(limit)
+                    .toList();
+        }
     }
 }

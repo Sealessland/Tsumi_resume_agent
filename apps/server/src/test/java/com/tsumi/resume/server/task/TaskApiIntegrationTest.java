@@ -3,6 +3,9 @@ package com.tsumi.resume.server.task;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -27,6 +30,7 @@ class TaskApiIntegrationTest {
     void createsAndReadsALocalAgentTask() throws Exception {
         importResume("res_task_api");
         var response = mockMvc.perform(post("/api/v1/tasks")
+                        .header("Idempotency-Key", "create-task-api-01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -35,15 +39,15 @@ class TaskApiIntegrationTest {
                                   "jobDescription": "Java Agent Engineer"
                                 }
                                 """))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(header().string("Location", startsWith("/api/v1/tasks/task_")))
-                .andExpect(jsonPath("$.status").value("REVIEW_READY"))
+                .andExpect(jsonPath("$.status").value("CREATED"))
+                .andExpect(jsonPath("$.eventsUrl", startsWith("/api/v1/tasks/task_")))
                 .andExpect(jsonPath("$.attempt").value(1))
                 .andExpect(jsonPath("$.repairCount").value(0))
                 .andExpect(jsonPath("$.traceId", startsWith("trace_")))
-                .andExpect(jsonPath("$.revision").value(4))
-                .andExpect(jsonPath("$.workflowSummary")
-                        .value("LOCAL_FAKE_READY_FOR_REVIEW"))
+                .andExpect(jsonPath("$.revision").value(0))
+                .andExpect(jsonPath("$.workflowSummary").doesNotExist())
                 .andReturn();
 
         var taskId = com.fasterxml.jackson.databind.json.JsonMapper.builder().build()
@@ -59,6 +63,7 @@ class TaskApiIntegrationTest {
     @Test
     void refusesToCreateATaskForAnUnknownResumeVersion() throws Exception {
         mockMvc.perform(post("/api/v1/tasks")
+                        .header("Idempotency-Key", "create-task-api-missing")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -74,12 +79,54 @@ class TaskApiIntegrationTest {
     @Test
     void rejectsInvalidCreateRequests() throws Exception {
         mockMvc.perform(post("/api/v1/tasks")
+                        .header("Idempotency-Key", "create-task-api-invalid")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"resumeId":"bad","baseVersion":0,"jobDescription":""}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void replaysPersistedEventsOverSseAndRejectsForeignCursor() throws Exception {
+        importResume("res_task_sse");
+        var response = mockMvc.perform(post("/api/v1/tasks")
+                        .header("Idempotency-Key", "create-task-sse-01")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "resumeId":"res_task_sse",
+                                  "baseVersion":1,
+                                  "jobDescription":"Java Agent Engineer"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        var taskId = com.fasterxml.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(response.getResponse().getContentAsString()).get("taskId").asText();
+        mockMvc.perform(post("/api/v1/tasks/{taskId}/cancel", taskId)
+                        .header("Idempotency-Key", "cancel-task-sse-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        var stream = mockMvc.perform(get("/api/v1/tasks/{taskId}/events", taskId)
+                        .header("Last-Event-ID", "0")
+                        .header("X-Session-ID", "test-session")
+                        .accept(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(stream))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("event:task.created")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("event:task.cancelled")));
+
+        mockMvc.perform(get("/api/v1/tasks/{taskId}/events", taskId)
+                        .header("Last-Event-ID", "999999")
+                        .header("X-Session-ID", "invalid-cursor"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("SSE_CURSOR_INVALID"));
     }
 
     @Test

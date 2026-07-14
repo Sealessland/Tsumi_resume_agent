@@ -25,6 +25,8 @@ import com.tsumi.resume.workflow.resume.DuplicateResumeVersionException;
 import com.tsumi.resume.workflow.evidence.EvidenceArtifactStore;
 import com.tsumi.resume.workflow.resume.ResumeVersionStore;
 import com.tsumi.resume.workflow.review.PatchStore;
+import com.tsumi.resume.workflow.WorkflowRequest;
+import com.tsumi.resume.workflow.WorkflowRequestStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +56,7 @@ class PersistentControlPlaneStoresTest {
     @Autowired private WorkflowCheckpointStore checkpoints;
     @Autowired private EvidenceArtifactStore evidence;
     @Autowired private IdempotencyStore idempotency;
+    @Autowired private WorkflowRequestStore workflowRequests;
     @Autowired private ObjectMapper objectMapper;
 
     @Test
@@ -134,6 +137,17 @@ class PersistentControlPlaneStoresTest {
         assertThatThrownBy(() -> idempotency.save(new IdempotencyRecord(
                         original.scope(), original.key(), "hash-b", 202, "{}", now)))
                 .isInstanceOf(IdempotencyConflictException.class);
+    }
+
+    @Test
+    void persistsPrivateWorkflowInputForRestartRecovery() {
+        var request = new WorkflowRequest(
+                "task_recovery_01", "需要 Java 与 Agent 工作流经验",
+                Instant.parse("2026-07-14T00:00:00Z"));
+
+        workflowRequests.save(request);
+
+        assertThat(workflowRequests.find("task_recovery_01")).contains(request);
     }
 
     private ObjectNode resume(String resumeId, long version) {

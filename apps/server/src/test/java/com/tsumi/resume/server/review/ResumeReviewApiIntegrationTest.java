@@ -58,6 +58,7 @@ class ResumeReviewApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("DUPLICATE_RESOURCE"));
 
         var taskResponse = mockMvc.perform(post("/api/v1/tasks")
+                        .header("Idempotency-Key", "review-flow-task-01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -66,8 +67,8 @@ class ResumeReviewApiIntegrationTest {
                                   "jobDescription": "Java Agent Engineer"
                                 }
                                 """))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("REVIEW_READY"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("CREATED"))
                 .andReturn();
         var taskId = objectMapper.readTree(taskResponse.getResponse().getContentAsByteArray())
                 .path("taskId").asText();
@@ -101,6 +102,7 @@ class ResumeReviewApiIntegrationTest {
                                 "/api/v1/tasks/{taskId}/patches/{patchId}/decision",
                                 taskId,
                                 "rp_api_flow")
+                        .header("Idempotency-Key", "decision-stale-rp-api-flow")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"expectedBaseVersion":2,"decision":"ACCEPTED"}
@@ -112,6 +114,19 @@ class ResumeReviewApiIntegrationTest {
                                 "/api/v1/tasks/{taskId}/patches/{patchId}/decision",
                                 taskId,
                                 "rp_api_flow")
+                        .header("Idempotency-Key", "decision-accept-rp-api-flow")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedBaseVersion":1,"decision":"ACCEPTED"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewStatus").value("ACCEPTED"));
+
+        mockMvc.perform(post(
+                                "/api/v1/tasks/{taskId}/patches/{patchId}/decision",
+                                taskId,
+                                "rp_api_flow")
+                        .header("Idempotency-Key", "decision-accept-rp-api-flow")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"expectedBaseVersion":1,"decision":"ACCEPTED"}
@@ -120,6 +135,7 @@ class ResumeReviewApiIntegrationTest {
                 .andExpect(jsonPath("$.reviewStatus").value("ACCEPTED"));
 
         mockMvc.perform(post("/api/v1/tasks/{taskId}/merge", taskId)
+                        .header("Idempotency-Key", "merge-rp-api-flow")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedBaseVersion\":1}"))
                 .andExpect(status().isCreated())
@@ -155,6 +171,7 @@ class ResumeReviewApiIntegrationTest {
                 .andExpect(status().isCreated());
 
         var taskResponse = mockMvc.perform(post("/api/v1/tasks")
+                        .header("Idempotency-Key", "review-unsupported-task-01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -163,7 +180,7 @@ class ResumeReviewApiIntegrationTest {
                                   "jobDescription":"Java Agent Engineer"
                                 }
                                 """))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn();
         var taskId = objectMapper.readTree(taskResponse.getResponse().getContentAsByteArray())
                 .path("taskId").asText();

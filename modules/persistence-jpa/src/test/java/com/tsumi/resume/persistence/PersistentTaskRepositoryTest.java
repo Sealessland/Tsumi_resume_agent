@@ -61,6 +61,25 @@ class PersistentTaskRepositoryTest {
                 .isInstanceOf(TaskVersionConflictException.class);
     }
 
+    @Test
+    void findsCreatedAndExpiredLeaseTasksForRestartRecoveryOnly() {
+        var now = Instant.parse("2026-07-14T00:00:00Z");
+        repository.save(ResumeTask.created("task_recover_created", "res_01", 1, "trace_rc", now));
+        var expired = ResumeTask.created("task_recover_expired", "res_01", 1, "trace_re", now)
+                .analyze(now).lease("dead_worker", now.minusSeconds(1), now.minusSeconds(2));
+        repository.save(ResumeTask.created("task_recover_expired", "res_01", 1, "trace_re", now));
+        repository.save(expired);
+        var live = ResumeTask.created("task_recover_live", "res_01", 1, "trace_rl", now)
+                .analyze(now).lease("live_worker", now.plusSeconds(60), now);
+        repository.save(ResumeTask.created("task_recover_live", "res_01", 1, "trace_rl", now));
+        repository.save(live);
+
+        assertThat(repository.findRecoverable(now, 20))
+                .extracting(ResumeTask::taskId)
+                .contains("task_recover_created", "task_recover_expired")
+                .doesNotContain("task_recover_live");
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @Import(PersistenceJpaConfiguration.class)
