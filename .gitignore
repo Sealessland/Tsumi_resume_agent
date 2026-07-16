@@ -1,4 +1,5 @@
 .superpowers/
+.worktrees/
 
 # Logs
 logs
@@ -14,6 +15,8 @@ dist
 dist-ssr
 *.local
 **/target/
+.data/
+config/ai-secrets.properties
 
 # Editor directories and files
 .vscode/*
