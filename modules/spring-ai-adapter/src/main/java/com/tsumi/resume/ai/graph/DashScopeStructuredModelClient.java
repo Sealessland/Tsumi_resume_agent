@@ -1,11 +1,10 @@
 package com.tsumi.resume.ai.graph;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -15,10 +14,15 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.ResponseFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.client.RestClientResponseException;
 
 public final class DashScopeStructuredModelClient {
 
-    private static final int MAX_INPUT_TOKENS = 12_000;
+    private static final Logger LOGGER = LoggerFactory.getLogger(DashScopeStructuredModelClient.class);
     private final ChatModel model;
     private final ObjectMapper mapper;
     private final Duration timeout;
@@ -43,25 +47,23 @@ public final class DashScopeStructuredModelClient {
             String policy,
             Object input,
             Class<T> outputType,
-            Object jsonSchema,
+            Map<String, Object> jsonSchema,
             String modelName,
             double temperature) {
-        var responseFormat = DashScopeResponseFormat.builder()
-                .type(DashScopeResponseFormat.Type.JSON_SCHEMA)
-                .jsonScheme(DashScopeResponseFormat.JsonSchemaConfig.builder()
+        var responseFormat = ResponseFormat.builder()
+                .type(ResponseFormat.Type.JSON_SCHEMA)
+                .jsonSchema(ResponseFormat.JsonSchema.builder()
                         .name(node + "_output")
-                        .description("Strict structured output for " + node)
                         .schema(jsonSchema)
                         .strict(true)
                         .build())
                 .build();
-        var options = DashScopeChatOptions.builder()
+        var options = OpenAiChatOptions.builder()
                 .model(modelName)
                 .temperature(temperature)
-                .maxToken(maxOutputTokens)
+                .maxTokens(maxOutputTokens)
                 .responseFormat(responseFormat)
                 .build();
-        options.setMaxInputTokens(MAX_INPUT_TOKENS);
         final String userJson;
         try {
             userJson = mapper.writeValueAsString(input);
@@ -81,14 +83,30 @@ public final class DashScopeStructuredModelClient {
                 throw new ModelOutputRejectedException(node, exception);
             } catch (WorkflowModelTimeoutException exception) {
                 lastFailure = exception;
+                logFailure(node, attempt, exception);
             } catch (RuntimeException exception) {
                 lastFailure = exception;
+                logFailure(node, attempt, exception);
             }
         }
         if (lastFailure instanceof WorkflowExecutionException controlled) throw controlled;
         throw new WorkflowExecutionException(
                 "MODEL_PROVIDER_UNAVAILABLE", true,
                 "Model provider remained unavailable after one retry", lastFailure);
+    }
+
+    private void logFailure(String node, int attempt, RuntimeException exception) {
+        Throwable root = exception;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        if (root instanceof RestClientResponseException response) {
+            LOGGER.warn("Model call failed node={} attempt={} type={} httpStatus={}",
+                    node, attempt, exception.getClass().getSimpleName(), response.getStatusCode().value());
+            return;
+        }
+        LOGGER.warn("Model call failed node={} attempt={} type={} rootType={}",
+                node, attempt, exception.getClass().getSimpleName(), root.getClass().getSimpleName());
     }
 
     private String invokeWithTimeout(String node, Prompt prompt) {

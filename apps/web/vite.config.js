@@ -4,4 +4,10 @@ import vue from '@vitejs/plugin-vue'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  server: {
+    proxy: {
+      '/api': process.env.TSUMI_API_URL || 'http://127.0.0.1:18080',
+      '/actuator': process.env.TSUMI_API_URL || 'http://127.0.0.1:18080',
+    },
+  },
 })

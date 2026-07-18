@@ -23,6 +23,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.UUID;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,6 +34,24 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile({"ai", "prod"})
 public class AiAgentConfiguration {
+
+    @Bean
+    ChatModel chatModel(
+            @Value("${spring.ai.openai.base-url}") String baseUrl,
+            @Value("${spring.ai.openai.api-key}") String apiKey,
+            @Value("${spring.ai.openai.chat.options.model}") String model) {
+        var api = OpenAiApi.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .build();
+        var options = OpenAiChatOptions.builder()
+                .model(model)
+                .build();
+        return OpenAiChatModel.builder()
+                .openAiApi(api)
+                .defaultOptions(options)
+                .build();
+    }
 
     @Bean
     DashScopeStructuredModelClient structuredModelClient(

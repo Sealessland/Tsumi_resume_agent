@@ -111,6 +111,9 @@ cd apps/web
 npm run dev
 ```
 
+页面顶部的“AI 简历优化工作台”通过 Vite 代理连接本地 Java 后端，默认目标为
+`http://127.0.0.1:18080`。可以使用 `TSUMI_API_URL` 覆盖代理目标。
+
 ### 生产构建
 
 ```bash
@@ -129,19 +132,46 @@ npm run preview
 
 ```bash
 mvn -pl apps/server -am package
-java -jar apps/server/target/server-0.1.0-SNAPSHOT.jar
+java -jar apps/server/target/server-0.1.0-SNAPSHOT.jar --server.port=18080
 ```
 
-本地默认使用 `LocalDeterministicWorkflow`，不会调用外部模型，也不会生成或编造简历事实。
+本地默认使用 `LocalDeterministicWorkflow`，用于验证任务、持久化、事件和审核控制面，
+不会调用外部模型，也不会生成 Patch。工作台会明确显示这一状态。
+
+要使用真实的 JD 分析、证据约束改写和 Evidence Guard 流程，可连接任意兼容
+OpenAI Chat Completions 的服务。Base URL、密钥和模型都通过环境变量注入：
 
 ```bash
-curl http://localhost:8080/actuator/health
+TSUMI_AI_BASE_URL=https://你的服务地址 \
+TSUMI_AI_API_KEY=你的密钥 \
+TSUMI_AI_MODEL=你的模型 \
+  java -jar apps/server/target/server-0.1.0-SNAPSHOT.jar \
+  --spring.profiles.active=ai \
+  --server.port=18080
+```
 
-curl -X POST http://localhost:8080/api/v1/resumes \
+也可以把配置安全持久化到本地 `config/ai-secrets.properties`。该文件已被 Git 忽略，
+应设置为仅当前用户可读：
+
+```bash
+tsumi.ai.base-url=https://你的服务地址
+tsumi.ai.api-key=你的密钥
+tsumi.ai.model=你的模型
+```
+
+`ai` profile 会自动读取该文件，不需要其他工具参与运行。也可继续使用
+`TSUMI_AI_ANALYST_MODEL`、`TSUMI_AI_REWRITE_MODEL`、`TSUMI_AI_GUARD_MODEL` 为三个节点分别指定模型。
+较慢的模型可通过 `TSUMI_AI_NODE_TIMEOUT` 调整单个节点超时，默认值为 `90s`。
+密钥不要写入受版本控制的配置、前端代码或命令行参数。
+
+```bash
+curl http://localhost:18080/actuator/health
+
+curl -X POST http://localhost:18080/api/v1/resumes \
   -H 'Content-Type: application/json' \
   --data-binary @contracts/fixtures/resume/valid-minimal-v13.json
 
-curl -X POST http://localhost:8080/api/v1/tasks \
+curl -X POST http://localhost:18080/api/v1/tasks \
   -H 'Content-Type: application/json' \
   -d '{"resumeId":"res_fixture","baseVersion":1,"jobDescription":"Java Agent Engineer"}'
 ```

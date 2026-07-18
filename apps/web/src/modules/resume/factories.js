@@ -154,18 +154,18 @@ export function createSectionVisibility(partial = {}) {
 
 export function createPanelsState() {
   return {
-    layout: true,
-    profile: true,
-    education: true,
+    layout: false,
+    profile: false,
+    education: false,
     skills: true,
-    internship: true,
-    research: true,
-    project: true,
-    student: true,
-    awards: true,
-    certificates: true,
-    selfSummary: true,
-    customImages: true,
-    theme: true,
+    internship: false,
+    research: false,
+    project: false,
+    student: false,
+    awards: false,
+    certificates: false,
+    selfSummary: false,
+    customImages: false,
+    theme: false,
   }
 }

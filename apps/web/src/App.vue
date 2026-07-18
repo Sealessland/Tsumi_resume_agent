@@ -1,14 +1,21 @@
 <script setup>
-import { reactive, ref, watch } from 'vue'
-import { Dialog } from 'tdesign-vue-next'
+import { computed, reactive, ref, watch } from 'vue'
+import { Dialog, Drawer } from 'tdesign-vue-next'
 import ResumeEditor from './components/resume/ResumeEditor.vue'
 import ResumePreview from './components/resume/ResumePreview.vue'
 import ResumeToolbar from './components/resume/ResumeToolbar.vue'
+import ResumeAssetLibrary from './components/resume/ResumeAssetLibrary.vue'
+import AgentWorkspace from './components/agent/AgentWorkspace.vue'
 import { useResumeBuilder } from './composables/useResumeBuilder'
+import { normalizeResumeData } from './modules/resume/normalize'
 
 const {
   resume,
   panels,
+  resumeAssets,
+  currentAssetId,
+  currentResumeAsset,
+  assetsLoading,
   photoUploadMessage,
   photoUploadError,
   educationLogoFeedback,
@@ -26,6 +33,13 @@ const {
   collapseAllPanels,
   loadDemo,
   clearAll,
+  createResumeAssetVersion,
+  selectResumeAsset,
+  duplicateResumeAsset,
+  updateResumeAssetMetadata,
+  archiveResumeAsset,
+  restoreResumeAsset,
+  removeResumeAsset,
   saveDraft,
   restoreDraft,
   exportPdf,
@@ -94,6 +108,22 @@ const dismissedNotices = reactive({
 })
 const clearConfirmVisible = ref(false)
 const clearConfirmLoading = ref(false)
+const assetDrawerVisible = ref(false)
+const agentDrawerVisible = ref(false)
+const currentAssetLabel = computed(() => {
+  const asset = currentResumeAsset.value
+  if (!asset) return '未选择岗位简历'
+  return [asset.targetCompany, asset.targetRole].filter(Boolean).join(' · ') || asset.title || '未命名岗位简历'
+})
+
+async function createAsset(type) {
+  await createResumeAssetVersion(type)
+}
+
+async function selectAsset(id) {
+  await selectResumeAsset(id)
+  assetDrawerVisible.value = false
+}
 
 function dismissNotice(type) {
   dismissedNotices[type] = true
@@ -116,6 +146,12 @@ async function confirmClearAll() {
   } finally {
     clearConfirmLoading.value = false
   }
+}
+
+function applyMergedResume(mergedResume) {
+  Object.assign(resume, normalizeResumeData(mergedResume))
+  actionErrorMessage.value = ''
+  actionStatusMessage.value = `AI 审核结果已合并并同步到编辑器（后端版本 v${mergedResume.version}）。`
 }
 
 watch(() => jsonStatusMessage.value, () => {
@@ -157,6 +193,43 @@ watch(() => `${pageOverflow.value}-${pageHeight.value}`, () => {
         @expand-all-panels="expandAllPanels"
         @collapse-all-panels="collapseAllPanels"
       />
+      <section class="asset-hub no-print" aria-label="当前岗位简历">
+        <div class="asset-hub__context">
+          <span class="asset-hub__eyebrow">当前简历</span>
+          <strong>{{ currentAssetLabel }}</strong>
+          <small>{{ resumeAssets.length }} 份档案</small>
+        </div>
+        <div class="asset-hub__actions">
+          <button type="button" class="asset-hub__manage" @click="assetDrawerVisible = true">管理版本</button>
+          <button type="button" class="asset-hub__quiet" @click="agentDrawerVisible = true">AI 优化 <span aria-hidden="true">→</span></button>
+        </div>
+      </section>
+
+      <Drawer v-model:visible="assetDrawerVisible" class="asset-library-drawer" placement="right" size="680px" :header="false" :footer="false">
+        <ResumeAssetLibrary
+          :assets="resumeAssets"
+          :current-asset-id="currentAssetId"
+          :loading="assetsLoading"
+          @create="createAsset"
+          @select="selectAsset"
+          @duplicate="duplicateResumeAsset"
+          @archive="archiveResumeAsset"
+          @restore="restoreResumeAsset"
+          @delete="removeResumeAsset"
+          @update-metadata="updateResumeAssetMetadata"
+          @close="assetDrawerVisible = false"
+        />
+      </Drawer>
+
+      <Drawer v-model:visible="agentDrawerVisible" class="agent-workspace-drawer" placement="right" size="680px" :header="false" :footer="false">
+        <AgentWorkspace
+          :resume="resume"
+          :job-description="currentResumeAsset?.jobDescription || ''"
+          :asset-label="currentAssetLabel"
+          @apply-merged-resume="applyMergedResume"
+          @close="agentDrawerVisible = false"
+        />
+      </Drawer>
 
       <Dialog
         v-model:visible="clearConfirmVisible"
@@ -336,3 +409,9 @@ watch(() => `${pageOverflow.value}-${pageHeight.value}`, () => {
     </main>
   </div>
 </template>
+<style scoped>
+.asset-hub { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; border-bottom: 1px solid #dce8ef; padding: 0 2px 13px; }
+.asset-hub__context { display: flex; min-width: 0; align-items: baseline; gap: 9px; } .asset-hub__eyebrow { color: #71879a; font-size: 11px; font-weight: 700; } .asset-hub__context strong { overflow: hidden; color: #25445a; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; } .asset-hub__context small { color: #94a6b4; font-size: 11px; }
+.asset-hub__actions { display: flex; flex-wrap: wrap; gap: 6px; } .asset-hub__manage, .asset-hub__quiet { border-radius: 7px; padding: 7px 10px; font-size: 12px; font-weight: 700; transition: .15s ease; } .asset-hub__manage { border: 1px solid #b8d9eb; background: #f3faff; color: #0873a4; } .asset-hub__manage:hover { background: #e5f6ff; } .asset-hub__quiet { border: 1px solid transparent; background: transparent; color: #58758b; } .asset-hub__quiet:hover { background: #f1f6f9; color: #145d83; }
+@media (max-width: 640px) { .asset-hub { align-items: flex-start; flex-direction: column; } .asset-hub__context { flex-wrap: wrap; } }
+</style>

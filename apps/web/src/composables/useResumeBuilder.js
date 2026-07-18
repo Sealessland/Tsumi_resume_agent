@@ -52,6 +52,15 @@ import {
   migrateLegacyDraftIfNeeded,
   saveResumeDraft,
 } from '../modules/resume/storage'
+import {
+  createResumeAsset,
+  deleteResumeAsset,
+  listResumeAssets,
+  loadActiveResumeAssetId,
+  normalizeResumeAsset,
+  saveActiveResumeAssetId,
+  saveResumeAsset,
+} from '../modules/resume/assets'
 
 const EDUCATION_LOGO_MAX_BYTES = 2 * 1024 * 1024
 const EDUCATION_LOGO_SUPPORTED_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp'])
@@ -74,7 +83,9 @@ function moveItem(list, fromIndex, toIndex) {
 export function useResumeBuilder() {
   const resume = reactive(normalizeResumeData(createDemoResume()))
   const panels = reactive(createPanelsState())
-
+  const resumeAssets = ref([])
+  const currentAssetId = ref('')
+  const assetsLoading = ref(true)
   const photoUploadMessage = ref('')
   const photoUploadError = ref('')
   const jsonStatusMessage = ref('')
@@ -82,11 +93,7 @@ export function useResumeBuilder() {
   const actionStatusMessage = ref('')
   const actionErrorMessage = ref('')
   const exportWarningMessage = ref('')
-  const educationLogoFeedback = reactive({
-    id: '',
-    message: '',
-    error: '',
-  })
+  const educationLogoFeedback = reactive({ id: '', message: '', error: '' })
   const jsonInputRef = ref(null)
   const pageOverflow = ref(false)
   const pageHeight = ref(0)
@@ -100,17 +107,11 @@ export function useResumeBuilder() {
   function restorePanelsState() {
     const raw = localStorage.getItem(PANELS_STORAGE_KEY)
     if (!raw) return
-
-    let svgUrl = ''
-
     try {
       const parsed = JSON.parse(raw)
       if (!parsed || typeof parsed !== 'object') return
-
       Object.keys(panels).forEach((key) => {
-        if (Object.prototype.hasOwnProperty.call(parsed, key)) {
-          panels[key] = Boolean(parsed[key])
-        }
+        if (Object.prototype.hasOwnProperty.call(parsed, key)) panels[key] = Boolean(parsed[key])
       })
     } catch (error) {
       console.error('Restore panels failed:', error)
@@ -121,14 +122,98 @@ export function useResumeBuilder() {
     localStorage.setItem(PANELS_STORAGE_KEY, JSON.stringify(panels))
   }
 
-  restorePanelsState()
-
   function applyResumeData(source) {
     Object.assign(resume, normalizeResumeData(source))
   }
 
   function createResumeSnapshot() {
     return normalizeResumeData(JSON.parse(JSON.stringify(resume)))
+  }
+
+  const currentResumeAsset = computed(() =>
+    resumeAssets.value.find((asset) => asset.id === currentAssetId.value) || null
+  )
+
+  function replaceAsset(asset) {
+    const index = resumeAssets.value.findIndex((item) => item.id === asset.id)
+    if (index === -1) resumeAssets.value.unshift(asset)
+    else resumeAssets.value.splice(index, 1, asset)
+  }
+
+  async function persistCurrentAsset() {
+    const current = currentResumeAsset.value
+    if (!current) return
+    replaceAsset(await saveResumeAsset({ ...current, resume: createResumeSnapshot() }))
+  }
+
+  async function selectResumeAsset(id) {
+    const target = resumeAssets.value.find((asset) => asset.id === id)
+    if (!target || target.id === currentAssetId.value) return
+    await persistCurrentAsset()
+    currentAssetId.value = target.id
+    await saveActiveResumeAssetId(target.id)
+    skipNextAutoSave = true
+    applyResumeData(target.resume)
+    actionStatusMessage.value = `已切换到「${target.title || target.targetRole || '未命名简历'}」，AI 将处理此版本。`
+  }
+
+  async function createResumeAssetVersion(type = 'blank') {
+    await persistCurrentAsset()
+    const asset = await saveResumeAsset(createResumeAsset({
+      title: type === 'demo' ? '示例岗位简历' : '新岗位简历',
+      resume: normalizeResumeData(type === 'demo' ? createDemoResume() : createEmptyResume()),
+    }))
+    replaceAsset(asset)
+    currentAssetId.value = asset.id
+    await saveActiveResumeAssetId(asset.id)
+    skipNextAutoSave = true
+    applyResumeData(asset.resume)
+  }
+
+  async function duplicateResumeAsset(id) {
+    const source = resumeAssets.value.find((asset) => asset.id === id)
+    if (!source) return
+    if (source.id === currentAssetId.value) await persistCurrentAsset()
+    const duplicate = await saveResumeAsset(createResumeAsset({
+      ...source,
+      id: '',
+      createdAt: '',
+      title: `${source.title || '岗位简历'} · 新岗位版`,
+      targetCompany: '',
+      targetRole: '',
+      jobDescription: '',
+      status: 'draft',
+      resume: JSON.parse(JSON.stringify(source.resume)),
+    }))
+    replaceAsset(duplicate)
+  }
+
+  async function updateResumeAssetMetadata(id, patch) {
+    const source = resumeAssets.value.find((asset) => asset.id === id)
+    if (!source) return
+    replaceAsset(await saveResumeAsset({ ...source, ...patch }))
+  }
+
+  async function archiveResumeAsset(id) {
+    await updateResumeAssetMetadata(id, { status: 'archived' })
+  }
+
+  async function restoreResumeAsset(id) {
+    await updateResumeAssetMetadata(id, { status: 'draft' })
+  }
+
+  async function removeResumeAsset(id) {
+    if (resumeAssets.value.length <= 1) {
+      actionErrorMessage.value = '至少保留一份岗位简历。'
+      return
+    }
+    await deleteResumeAsset(id)
+    resumeAssets.value = resumeAssets.value.filter((asset) => asset.id !== id)
+    if (currentAssetId.value === id) {
+      currentAssetId.value = resumeAssets.value[0].id
+      await saveActiveResumeAssetId(currentAssetId.value)
+      applyResumeData(resumeAssets.value[0].resume)
+    }
   }
 
   function resetPhotoFeedback() {
@@ -153,14 +238,8 @@ export function useResumeBuilder() {
       skipNextAutoSave = false
       return
     }
-
-    if (autoSaveTimer) {
-      window.clearTimeout(autoSaveTimer)
-    }
-
-    autoSaveTimer = window.setTimeout(() => {
-      persistDraft({ manual: false })
-    }, AUTO_SAVE_DELAY)
+    if (autoSaveTimer) window.clearTimeout(autoSaveTimer)
+    autoSaveTimer = window.setTimeout(() => persistDraft({ manual: false }), AUTO_SAVE_DELAY)
   }
 
   async function persistDraft({ manual = false } = {}) {
@@ -168,33 +247,24 @@ export function useResumeBuilder() {
       window.clearTimeout(autoSaveTimer)
       autoSaveTimer = null
     }
-
-    if (manual) {
-      clearActionFeedback()
-    }
-
+    if (manual) clearActionFeedback()
     try {
       const result = await saveResumeDraft(createResumeSnapshot())
       storageBackend.value = result.backend
-
+      await persistCurrentAsset()
       if (result.backend === 'localstorage') {
         if (!hasShownFallbackNotice) {
           actionErrorMessage.value = 'IndexedDB 不可用，已回退到浏览器本地轻量存储。'
           hasShownFallbackNotice = true
         }
-        if (manual) {
-          actionStatusMessage.value = '草稿已保存到浏览器本地存储。'
-        }
+        if (manual) actionStatusMessage.value = '岗位简历已保存到浏览器本地存储。'
         return
       }
-
       hasShownFallbackNotice = false
-      if (manual) {
-        actionStatusMessage.value = '草稿已保存到浏览器本地数据库。'
-      }
+      if (manual) actionStatusMessage.value = '岗位简历已保存到浏览器本地数据库。'
     } catch (error) {
       console.error('Save draft failed:', error)
-      actionErrorMessage.value = '草稿保存失败，请稍后重试。'
+      actionErrorMessage.value = '岗位简历保存失败，请稍后重试。'
     }
   }
 
@@ -204,16 +274,12 @@ export function useResumeBuilder() {
   }
 
   function expandAllPanels() {
-    Object.keys(panels).forEach((key) => {
-      panels[key] = true
-    })
+    Object.keys(panels).forEach((key) => { panels[key] = true })
     savePanelsState()
   }
 
   function collapseAllPanels() {
-    Object.keys(panels).forEach((key) => {
-      panels[key] = false
-    })
+    Object.keys(panels).forEach((key) => { panels[key] = false })
     savePanelsState()
   }
 
@@ -230,13 +296,13 @@ export function useResumeBuilder() {
     applyResumeData(createEmptyResume())
     resetPhotoFeedback()
     resetEducationLogoFeedback()
-
     try {
       await deleteResumeDraft()
-      actionStatusMessage.value = '已清空当前内容，并移除本地草稿。'
+      await persistCurrentAsset()
+      actionStatusMessage.value = '已清空当前岗位简历内容。'
     } catch (error) {
       console.error('Clear draft failed:', error)
-      actionErrorMessage.value = '内容已清空，但本地草稿删除失败。'
+      actionErrorMessage.value = '内容已清空，但本地保存失败。'
     }
   }
 
@@ -246,16 +312,15 @@ export function useResumeBuilder() {
 
   async function restoreDraft() {
     clearActionFeedback()
-
     try {
       const draft = await loadResumeDraft()
       if (!draft) {
         actionErrorMessage.value = '当前没有可恢复的本地草稿。'
         return
       }
-
       skipNextAutoSave = true
       applyResumeData(draft)
+      await persistCurrentAsset()
       resetPhotoFeedback()
       resetEducationLogoFeedback()
       actionStatusMessage.value = '本地草稿已恢复。'
@@ -265,609 +330,166 @@ export function useResumeBuilder() {
     }
   }
 
+  function hasVisibleSection() {
+    return Object.values(resume.sectionVisibility).some(Boolean)
+  }
+
+  function hasCoreContent() {
+    return Boolean(
+      resume.skills.trim()
+      || resume.internships.some((item) => !item.hidden && (item.company || item.summary || item.highlights))
+      || resume.researchExperiences.some((item) => !item.hidden && (item.title || item.summary || item.highlights))
+      || resume.projects.some((item) => !item.hidden && (item.name || item.summary || item.highlights))
+      || resume.studentExperiences.some((item) => !item.hidden && (item.organization || item.summary || item.highlights))
+      || resume.customImages.some((item) => !item.hidden && item.image)
+    )
+  }
+
+  function validateBeforeExport() {
+    const warnings = []
+    if (!String(resume.profile.name || '').trim()) warnings.push('姓名未填写')
+    if (!hasVisibleSection()) warnings.push('所有栏目当前都处于隐藏状态')
+    if (!hasCoreContent()) warnings.push('技术栈、经历或展示内容目前都为空')
+    exportWarningMessage.value = warnings.length ? `导出提醒：${warnings.join('；')}。` : ''
+  }
+
   function exportPdf() {
     validateBeforeExport()
     window.print()
   }
 
-  function readStyleText() {
-    let cssText = ''
-    Array.from(document.styleSheets).forEach((sheet) => {
-      try {
-        Array.from(sheet.cssRules || []).forEach((rule) => {
-          cssText += `${rule.cssText}\n`
-        })
-      } catch (error) {
-        // Ignore cross-origin stylesheets.
-      }
-    })
-    return cssText
-  }
-
-  function blobToDataUrl(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => reject(new Error('BLOB_TO_DATA_URL_FAILED'))
-      reader.readAsDataURL(blob)
-    })
-  }
-
-  async function toInlineImageUrl(src = '') {
-    const source = String(src || '').trim()
-    if (!source) return ''
-    if (source.startsWith('data:')) return source
-
-    const response = await fetch(source)
-    if (!response.ok) {
-      throw new Error('EXPORT_IMAGE_FETCH_FAILED')
-    }
-
-    const blob = await response.blob()
-    return blobToDataUrl(blob)
-  }
-
-  async function inlineCloneImages(node) {
-    const images = Array.from(node.querySelectorAll('img'))
-    await Promise.all(
-      images.map(async (image) => {
-        const src = image.currentSrc || image.src || image.getAttribute('src') || ''
-        if (!src) return
-
-        try {
-          const dataUrl = await toInlineImageUrl(src)
-          if (dataUrl) {
-            image.setAttribute('src', dataUrl)
-          }
-        } catch (error) {
-          console.warn('Inline export image failed:', src, error)
-        }
-      })
-    )
-  }
-
-  function loadImage(src) {
-    return new Promise((resolve, reject) => {
-      const image = new Image()
-      image.decoding = 'sync'
-      image.crossOrigin = 'anonymous'
-      image.onload = () => resolve(image)
-      image.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'))
-      image.src = src
-    })
-  }
-
-  async function exportImage() {
-    validateBeforeExport()
-    clearActionFeedback()
-
-    const target = document.getElementById('resume-preview-page')
-    if (!target) {
-      actionErrorMessage.value = '导出图片失败：未找到简历预览区域。'
-      return
-    }
-
-    try {
-      const cloned = target.cloneNode(true)
-      const width = Math.ceil(target.scrollWidth)
-      const height = Math.ceil(target.scrollHeight)
-      await inlineCloneImages(cloned)
-      const cssText = readStyleText()
-      const serialized = new XMLSerializer().serializeToString(cloned)
-      const svgText = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-          <foreignObject width="100%" height="100%">
-            <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;background:#ffffff;">
-              <style>${cssText}</style>
-              ${serialized}
-            </div>
-          </foreignObject>
-        </svg>
-      `
-      const svgBlob = new Blob([svgText], {
-        type: 'image/svg+xml;charset=utf-8',
-      })
-      const svgUrl = URL.createObjectURL(svgBlob)
-      const image = await loadImage(svgUrl)
-      const scale = Math.max(2, Math.min(3, Math.ceil(window.devicePixelRatio || 1)))
-      const canvas = document.createElement('canvas')
-      canvas.width = width * scale
-      canvas.height = height * scale
-      const context = canvas.getContext('2d')
-      if (!context) throw new Error('CANVAS_CONTEXT_UNAVAILABLE')
-
-      context.fillStyle = '#ffffff'
-      context.fillRect(0, 0, canvas.width, canvas.height)
-      context.drawImage(image, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(svgUrl)
-
-      const url = canvas.toDataURL('image/png')
-      const anchor = document.createElement('a')
-      const dateText = new Date().toISOString().slice(0, 10)
-      anchor.href = url
-      anchor.download = `resume-${dateText}.png`
-      anchor.click()
-      actionStatusMessage.value = '图片导出成功（PNG）。'
-    } catch (error) {
-      console.error(error)
-      actionErrorMessage.value = '图片导出失败，请稍后重试。'
-    }
-  }
-
   function exportJson() {
-    jsonStatusMessage.value = ''
-    jsonErrorMessage.value = ''
-
-    try {
-      const payload = {
-        ...resume,
-        meta: {
-          ...resume.meta,
-          schemaVersion: SCHEMA_VERSION,
-        },
-      }
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json;charset=utf-8',
-      })
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      const dateText = new Date().toISOString().slice(0, 10)
-      anchor.href = url
-      anchor.download = `resume-${dateText}.json`
-      anchor.click()
-      URL.revokeObjectURL(url)
-      jsonStatusMessage.value = 'JSON 导出成功。'
-    } catch (error) {
-      console.error(error)
-      jsonErrorMessage.value = 'JSON 导出失败，请重试。'
-    }
+    const content = JSON.stringify(createResumeSnapshot(), null, 2)
+    const blob = new Blob([content], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${resume.profile.name || 'resume'}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    jsonStatusMessage.value = '当前岗位简历已导出为 JSON。'
   }
 
   function triggerJsonImport() {
-    jsonStatusMessage.value = ''
-    jsonErrorMessage.value = ''
     jsonInputRef.value?.click()
   }
 
-  async function handleJsonImport(event) {
+  function handleJsonImport(event) {
     const input = event.target
-    const [file] = input.files || []
+    const file = input.files?.[0]
+    input.value = ''
     if (!file) return
-
-    jsonStatusMessage.value = ''
-    jsonErrorMessage.value = ''
-
-    try {
-      const text = await file.text()
-      const parsed = JSON.parse(text)
-      if (!parsed || typeof parsed !== 'object') {
-        throw new Error('INVALID_JSON_SHAPE')
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        applyResumeData(JSON.parse(String(reader.result || '')))
+        jsonStatusMessage.value = 'JSON 简历已导入到当前岗位版本。'
+      } catch (error) {
+        jsonErrorMessage.value = 'JSON 文件格式无效，无法导入。'
       }
-
-      applyResumeData(parsed)
-      jsonStatusMessage.value = 'JSON 导入成功，已替换当前简历。'
-    } catch (error) {
-      console.error(error)
-      jsonErrorMessage.value = 'JSON 导入失败，请检查文件内容是否正确。'
-    } finally {
-      input.value = ''
     }
+    reader.onerror = () => { jsonErrorMessage.value = 'JSON 文件读取失败，请重试。' }
+    reader.readAsText(file)
   }
 
-  function addEducation() {
-    resume.educations.push(createEducationItem())
-  }
+  function addEducation() { resume.educations.push(createEducationItem()) }
+  function removeEducation(id) { resume.educations = resume.educations.filter((item) => item.id !== id) }
+  function toggleEducationHidden(id) { const item = resume.educations.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveEducationUp(index) { moveItem(resume.educations, index, index - 1) }
+  function moveEducationDown(index) { moveItem(resume.educations, index, index + 1) }
+  function addInternship() { resume.internships.push(createInternshipItem()) }
+  function removeInternship(id) { resume.internships = resume.internships.filter((item) => item.id !== id) }
+  function toggleInternshipHidden(id) { const item = resume.internships.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveInternshipUp(index) { moveItem(resume.internships, index, index - 1) }
+  function moveInternshipDown(index) { moveItem(resume.internships, index, index + 1) }
+  function addResearchExperience() { resume.researchExperiences.push(createResearchExperienceItem()) }
+  function removeResearchExperience(id) { resume.researchExperiences = resume.researchExperiences.filter((item) => item.id !== id) }
+  function toggleResearchExperienceHidden(id) { const item = resume.researchExperiences.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveResearchExperienceUp(index) { moveItem(resume.researchExperiences, index, index - 1) }
+  function moveResearchExperienceDown(index) { moveItem(resume.researchExperiences, index, index + 1) }
+  function addProject() { resume.projects.push(createProjectItem()) }
+  function removeProject(id) { resume.projects = resume.projects.filter((item) => item.id !== id) }
+  function toggleProjectHidden(id) { const item = resume.projects.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveProjectUp(index) { moveItem(resume.projects, index, index - 1) }
+  function moveProjectDown(index) { moveItem(resume.projects, index, index + 1) }
+  function addStudentExperience() { resume.studentExperiences.push(createStudentExperienceItem()) }
+  function removeStudentExperience(id) { resume.studentExperiences = resume.studentExperiences.filter((item) => item.id !== id) }
+  function toggleStudentExperienceHidden(id) { const item = resume.studentExperiences.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveStudentExperienceUp(index) { moveItem(resume.studentExperiences, index, index - 1) }
+  function moveStudentExperienceDown(index) { moveItem(resume.studentExperiences, index, index + 1) }
+  function addCustomImage() { resume.customImages.push(createCustomImageItem()) }
+  function removeCustomImage(id) { resume.customImages = resume.customImages.filter((item) => item.id !== id) }
+  function toggleCustomImageHidden(id) { const item = resume.customImages.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveCustomImageUp(index) { moveItem(resume.customImages, index, index - 1) }
+  function moveCustomImageDown(index) { moveItem(resume.customImages, index, index + 1) }
+  function addAward() { resume.awards.push(createAwardItem()) }
+  function removeAward(id) { resume.awards = resume.awards.filter((item) => item.id !== id) }
+  function toggleAwardHidden(id) { const item = resume.awards.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveAwardUp(index) { moveItem(resume.awards, index, index - 1) }
+  function moveAwardDown(index) { moveItem(resume.awards, index, index + 1) }
+  function addCertificate() { resume.certificates.push(createCertificateItem()) }
+  function removeCertificate(id) { resume.certificates = resume.certificates.filter((item) => item.id !== id) }
+  function toggleCertificateHidden(id) { const item = resume.certificates.find((entry) => entry.id === id); if (item) item.hidden = !item.hidden }
+  function moveCertificateUp(index) { moveItem(resume.certificates, index, index - 1) }
+  function moveCertificateDown(index) { moveItem(resume.certificates, index, index + 1) }
 
-  function removeEducation(id) {
-    const index = resume.educations.findIndex((item) => item.id === id)
-    if (index >= 0) resume.educations.splice(index, 1)
-  }
-
-  function toggleEducationHidden(id) {
-    const target = resume.educations.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveEducationUp(index) {
-    moveItem(resume.educations, index, index - 1)
-  }
-
-  function moveEducationDown(index) {
-    moveItem(resume.educations, index, index + 1)
-  }
-
-  function onEducationLogoChange(id, event) {
-    const input = event?.target
-    const [file] = input?.files || []
-    if (!file) return
-
-    resetEducationLogoFeedback(id)
-
-    if (!EDUCATION_LOGO_SUPPORTED_TYPES.has(file.type)) {
-      educationLogoFeedback.error = '学校 Logo 仅支持 JPG / PNG / WebP。'
-      input.value = ''
-      return
-    }
-
-    if (file.size > EDUCATION_LOGO_MAX_BYTES) {
-      educationLogoFeedback.error = '学校 Logo 不能超过 2MB。'
-      input.value = ''
-      return
-    }
-
-    const target = resume.educations.find((item) => item.id === id)
-    if (!target) {
-      input.value = ''
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      target.logo = String(reader.result || '')
-      educationLogoFeedback.message = `学校 Logo 上传成功（${(file.size / 1024).toFixed(1)}KB）。`
-      educationLogoFeedback.error = ''
-    }
-    reader.onerror = () => {
-      educationLogoFeedback.error = '学校 Logo 读取失败，请重试。'
-      educationLogoFeedback.message = ''
-    }
-    reader.readAsDataURL(file)
-    input.value = ''
-  }
-
-  function removeEducationLogo(id) {
-    const target = resume.educations.find((item) => item.id === id)
-    if (target) {
-      target.logo = ''
-      resetEducationLogoFeedback(id)
-      educationLogoFeedback.message = '已移除学校 Logo。'
-    }
-  }
-
-  function addInternship() {
-    resume.internships.push(createInternshipItem())
-  }
-
-  function removeInternship(id) {
-    const index = resume.internships.findIndex((item) => item.id === id)
-    if (index >= 0) resume.internships.splice(index, 1)
-  }
-
-  function toggleInternshipHidden(id) {
-    const target = resume.internships.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveInternshipUp(index) {
-    moveItem(resume.internships, index, index - 1)
-  }
-
-  function moveInternshipDown(index) {
-    moveItem(resume.internships, index, index + 1)
-  }
-
-function addProject() {
-  resume.projects.push(createProjectItem())
-}
-
-function addStudentExperience() {
-  resume.studentExperiences.push(createStudentExperienceItem())
-}
-
-function removeStudentExperience(id) {
-  const index = resume.studentExperiences.findIndex((item) => item.id === id)
-  if (index >= 0) resume.studentExperiences.splice(index, 1)
-}
-
-function toggleStudentExperienceHidden(id) {
-  const target = resume.studentExperiences.find((item) => item.id === id)
-  if (target) target.hidden = !target.hidden
-}
-
-function moveStudentExperienceUp(index) {
-  moveItem(resume.studentExperiences, index, index - 1)
-}
-
-function moveStudentExperienceDown(index) {
-  moveItem(resume.studentExperiences, index, index + 1)
-}
-
-  function addResearchExperience() {
-    resume.researchExperiences.push(createResearchExperienceItem())
-  }
-
-  function removeResearchExperience(id) {
-    const index = resume.researchExperiences.findIndex((item) => item.id === id)
-    if (index >= 0) resume.researchExperiences.splice(index, 1)
-  }
-
-  function toggleResearchExperienceHidden(id) {
-    const target = resume.researchExperiences.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveResearchExperienceUp(index) {
-    moveItem(resume.researchExperiences, index, index - 1)
-  }
-
-  function moveResearchExperienceDown(index) {
-    moveItem(resume.researchExperiences, index, index + 1)
-  }
-
-  function removeProject(id) {
-    const index = resume.projects.findIndex((item) => item.id === id)
-    if (index >= 0) resume.projects.splice(index, 1)
-  }
-
-  function toggleProjectHidden(id) {
-    const target = resume.projects.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveProjectUp(index) {
-    moveItem(resume.projects, index, index - 1)
-  }
-
-  function moveProjectDown(index) {
-    moveItem(resume.projects, index, index + 1)
-  }
-
-  function addCustomImage() {
-    resume.customImages.push(createCustomImageItem())
-  }
-
-  function removeCustomImage(id) {
-    const index = resume.customImages.findIndex((item) => item.id === id)
-    if (index >= 0) resume.customImages.splice(index, 1)
-  }
-
-  function toggleCustomImageHidden(id) {
-    const target = resume.customImages.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveCustomImageUp(index) {
-    moveItem(resume.customImages, index, index - 1)
-  }
-
-  function moveCustomImageDown(index) {
-    moveItem(resume.customImages, index, index + 1)
-  }
-
-  function addAward() {
-    resume.awards.push(createAwardItem())
-  }
-
-  function removeAward(id) {
-    const index = resume.awards.findIndex((item) => item.id === id)
-    if (index >= 0) resume.awards.splice(index, 1)
-  }
-
-  function toggleAwardHidden(id) {
-    const target = resume.awards.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveAwardUp(index) {
-    moveItem(resume.awards, index, index - 1)
-  }
-
-  function moveAwardDown(index) {
-    moveItem(resume.awards, index, index + 1)
-  }
-
-  function addCertificate() {
-    resume.certificates.push(createCertificateItem())
-  }
-
-  function removeCertificate(id) {
-    const index = resume.certificates.findIndex((item) => item.id === id)
-    if (index >= 0) resume.certificates.splice(index, 1)
-  }
-
-  function toggleCertificateHidden(id) {
-    const target = resume.certificates.find((item) => item.id === id)
-    if (target) target.hidden = !target.hidden
-  }
-
-  function moveCertificateUp(index) {
-    moveItem(resume.certificates, index, index - 1)
-  }
-
-  function moveCertificateDown(index) {
-    moveItem(resume.certificates, index, index + 1)
-  }
-
-  function updateLayoutOrder(nextOrder) {
-    resume.layout.order = normalizeLayoutOrder(nextOrder)
-  }
-
-  function onLogoChange(id, event) {
-    const [file] = event.target.files || []
-    if (!file) return
-
-    const target = resume.internships.find((item) => item.id === id)
-    if (!target) return
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      target.logo = String(reader.result || '')
-    }
-    reader.readAsDataURL(file)
-    event.target.value = ''
-  }
-
-  function removeLogo(id) {
-    const target = resume.internships.find((item) => item.id === id)
-    if (target) target.logo = ''
-  }
-
-  function onCustomImageChange(id, event) {
+  function onPhotoChange(event) {
     const input = event.target
-    const [file] = input.files || []
-    if (!file) return
-
-    if (!CUSTOM_IMAGE_SUPPORTED_TYPES.has(file.type)) {
-      actionErrorMessage.value = '自定义图片仅支持 JPG / PNG / WebP / SVG。'
-      input.value = ''
-      return
-    }
-
-    if (file.size > CUSTOM_IMAGE_MAX_BYTES) {
-      actionErrorMessage.value = '自定义图片不能超过 5MB。'
-      input.value = ''
-      return
-    }
-
-    const target = resume.customImages.find((item) => item.id === id)
-    if (!target) {
-      input.value = ''
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      target.image = String(reader.result || '')
-      target.alt = target.alt || file.name
-      actionStatusMessage.value = `自定义图片上传成功（${(file.size / 1024).toFixed(1)}KB）。`
-      actionErrorMessage.value = ''
-    }
-    reader.onerror = () => {
-      actionErrorMessage.value = '自定义图片读取失败，请重试。'
-      actionStatusMessage.value = ''
-    }
-    reader.readAsDataURL(file)
+    const file = input.files?.[0]
     input.value = ''
-  }
-
-  function removeCustomImageFile(id) {
-    const target = resume.customImages.find((item) => item.id === id)
-    if (target) {
-      target.image = ''
-      actionStatusMessage.value = '已移除自定义图片。'
-      actionErrorMessage.value = ''
-    }
-  }
-
-  async function onPhotoChange(event) {
-    const input = event.target
-    const [file] = input.files || []
     if (!file) return
-
-    resetPhotoFeedback()
-    input.value = ''
-
-    try {
-      const result = await processProfilePhoto(file)
-      if (!result.ok) {
-        photoUploadError.value = result.error
-        return
-      }
-
-      resume.profile.photo = result.photo
-      resume.profile.photoMeta = result.photoMeta
+    processProfilePhoto(file).then((result) => {
+      resume.profile.photo = result.dataUrl
+      resume.profile.photoMeta = result.meta
       photoUploadMessage.value = result.message
-    } catch (error) {
+      photoUploadError.value = ''
+    }).catch((error) => {
       console.error(error)
       photoUploadError.value = '图片处理失败，请重试。'
-    }
+    })
   }
 
-  function removePhoto() {
-    resume.profile.photo = ''
-    resume.profile.photoMeta = null
-    resetPhotoFeedback()
-  }
+  function removePhoto() { resume.profile.photo = ''; resume.profile.photoMeta = null }
+  function onEducationLogoChange(event, id) { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; if (!EDUCATION_LOGO_SUPPORTED_TYPES.has(file.type) || file.size > EDUCATION_LOGO_MAX_BYTES) { educationLogoFeedback.error = '请上传 2MB 内的 JPG、PNG 或 WebP 图片。'; return }; const reader = new FileReader(); reader.onload = () => { const item = resume.educations.find((entry) => entry.id === id); if (item) item.logo = String(reader.result || '') }; reader.readAsDataURL(file) }
+  function removeEducationLogo(id) { const item = resume.educations.find((entry) => entry.id === id); if (item) item.logo = '' }
+  function onLogoChange(event, id) { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; const reader = new FileReader(); reader.onload = () => { const item = resume.internships.find((entry) => entry.id === id); if (item) item.logo = String(reader.result || '') }; reader.readAsDataURL(file) }
+  function removeLogo(id) { const item = resume.internships.find((entry) => entry.id === id); if (item) item.logo = '' }
+  function onCustomImageChange(event, id) { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; if (!CUSTOM_IMAGE_SUPPORTED_TYPES.has(file.type) || file.size > CUSTOM_IMAGE_MAX_BYTES) return; const reader = new FileReader(); reader.onload = () => { const item = resume.customImages.find((entry) => entry.id === id); if (item) item.image = String(reader.result || '') }; reader.readAsDataURL(file) }
+  function removeCustomImageFile(id) { const item = resume.customImages.find((entry) => entry.id === id); if (item) item.image = '' }
+  function onPageOverflowChange(payload) { pageOverflow.value = Boolean(payload?.overflow); pageHeight.value = Math.round(Number(payload?.height) || 0) }
+  function updateLayoutOrder(order) { resume.layout.order = normalizeLayoutOrder(order) }
 
-  function onPageOverflowChange(payload) {
-    pageOverflow.value = Boolean(payload?.overflow)
-    pageHeight.value = Number(payload?.height || 0)
-  }
-
-  function hasVisibleSection() {
-    return Object.values(resume.sectionVisibility || {}).some((visible) => visible !== false)
-  }
-
-  function hasCoreContent() {
-    const hasSkills = Boolean(String(resume.skills || '').trim())
-    const hasInternships = resume.internships.some(
-      (item) => Boolean(String(item.company || item.summary || item.highlights || '').trim()) && !item.hidden
-    )
-    const hasResearchExperiences = resume.researchExperiences.some(
-      (item) =>
-        Boolean(
-          String(
-            item.title ||
-              item.lab ||
-              item.paperTitle ||
-              item.journal ||
-              item.summary ||
-              item.highlights ||
-              ''
-          ).trim()
-        ) && !item.hidden
-    )
-    const hasProjects = resume.projects.some(
-      (item) => Boolean(String(item.name || item.summary || item.highlights || '').trim()) && !item.hidden
-    )
-    const hasStudentExperiences = resume.studentExperiences.some(
-      (item) => Boolean(String(item.organization || item.summary || item.highlights || '').trim()) && !item.hidden
-    )
-    const hasCustomImages = resume.customImages.some(
-      (item) => Boolean(String(item.image || '').trim()) && !item.hidden
-    )
-    return hasSkills || hasInternships || hasResearchExperiences || hasProjects || hasStudentExperiences || hasCustomImages
-  }
-
-  function validateBeforeExport() {
-    const warnings = []
-    if (!String(resume.profile.name || '').trim()) {
-      warnings.push('姓名未填写')
-    }
-    if (!hasVisibleSection()) {
-      warnings.push('所有栏目当前都处于隐藏状态')
-    }
-    if (!hasCoreContent()) {
-      warnings.push('技术栈、实习经历、科研经历、项目经历、图片展示目前都为空')
-    }
-    exportWarningMessage.value = warnings.length ? `导出提醒：${warnings.join('；')}。` : ''
-    return warnings
-  }
-
-  async function bootstrapDraft() {
+  async function bootstrapResumeAssets() {
+    assetsLoading.value = true
     try {
-      const migrated = await migrateLegacyDraftIfNeeded()
-      const draft = await loadResumeDraft()
-
-      if (draft) {
+      const assets = await listResumeAssets()
+      if (!assets.length) {
+        const draft = await loadResumeDraft()
+        const initial = await saveResumeAsset(createResumeAsset({ title: '我的岗位简历', status: 'active', resume: normalizeResumeData(draft || resume) }))
+        resumeAssets.value = [initial]
+        currentAssetId.value = initial.id
+        await saveActiveResumeAssetId(initial.id)
         skipNextAutoSave = true
-        applyResumeData(draft)
-        resetPhotoFeedback()
-        resetEducationLogoFeedback()
-      }
-
-      if (migrated) {
-        actionStatusMessage.value = '已将旧版本地草稿迁移到 IndexedDB。'
-        await persistDraft({ manual: false })
+        applyResumeData(initial.resume)
+      } else {
+        resumeAssets.value = assets
+        const activeId = await loadActiveResumeAssetId()
+        const active = assets.find((asset) => asset.id === activeId) || assets[0]
+        currentAssetId.value = active.id
+        await saveActiveResumeAssetId(active.id)
+        skipNextAutoSave = true
+        applyResumeData(active.resume)
       }
     } catch (error) {
-      console.error('Bootstrap draft failed:', error)
-      storageBackend.value = 'localstorage'
-      actionErrorMessage.value = '本地数据库初始化失败，已回退到浏览器本地存储。'
+      console.error('Bootstrap resume assets failed:', error)
+      actionErrorMessage.value = '岗位简历资产库初始化失败，当前仍可继续编辑。'
     } finally {
+      assetsLoading.value = false
       bootstrapping = false
     }
   }
 
-  watch(
-    resume,
-    () => {
-      scheduleAutoSave()
-    },
-    { deep: true }
-  )
-
-  bootstrapDraft()
+  watch(resume, () => scheduleAutoSave(), { deep: true })
 
   const brandStyle = computed(() => ({
     '--brand': resume.theme.primaryColor || '#4a9fff',
@@ -888,12 +510,12 @@ function moveStudentExperienceDown(index) {
     '--project-highlights-font-size': `${clampProjectHighlightsFontSize(resume.theme.projectHighlightsFontSize)}px`,
     '--project-name-font-size': `${clampProjectNameFontSize(resume.theme.projectNameFontSize)}px`,
     '--project-meta-font-size': `${clampProjectMetaFontSize(resume.theme.projectMetaFontSize)}px`,
-      '--project-tag-font-size': `${clampProjectTagFontSize(resume.theme.projectTagFontSize)}px`,
-      '--student-name-font-size': `${clampStudentNameFontSize(resume.theme.studentNameFontSize)}px`,
-      '--student-meta-font-size': `${clampStudentMetaFontSize(resume.theme.studentMetaFontSize)}px`,
-      '--student-summary-font-size': `${clampStudentSummaryFontSize(resume.theme.studentSummaryFontSize)}px`,
-      '--student-highlights-font-size': `${clampStudentHighlightsFontSize(resume.theme.studentHighlightsFontSize)}px`,
-      '--award-title-font-size': `${clampAwardTitleFontSize(resume.theme.awardTitleFontSize)}px`,
+    '--project-tag-font-size': `${clampProjectTagFontSize(resume.theme.projectTagFontSize)}px`,
+    '--student-name-font-size': `${clampStudentNameFontSize(resume.theme.studentNameFontSize)}px`,
+    '--student-meta-font-size': `${clampStudentMetaFontSize(resume.theme.studentMetaFontSize)}px`,
+    '--student-summary-font-size': `${clampStudentSummaryFontSize(resume.theme.studentSummaryFontSize)}px`,
+    '--student-highlights-font-size': `${clampStudentHighlightsFontSize(resume.theme.studentHighlightsFontSize)}px`,
+    '--award-title-font-size': `${clampAwardTitleFontSize(resume.theme.awardTitleFontSize)}px`,
     '--award-meta-font-size': `${clampAwardMetaFontSize(resume.theme.awardMetaFontSize)}px`,
     '--award-description-font-size': `${clampAwardDescriptionFontSize(resume.theme.awardDescriptionFontSize)}px`,
     '--certificate-title-font-size': `${clampCertificateTitleFontSize(resume.theme.certificateTitleFontSize)}px`,
@@ -912,114 +534,35 @@ function moveStudentExperienceDown(index) {
     '--education-logo-size': `${clampEducationLogoSize(resume.theme.educationLogoSize)}px`,
   }))
 
-  // Keep theme variables in a real <style> tag (not only on #app inline style) so
-  // Safari/WebKit print contexts inherit them reliably. Also duplicate them inside
-  // @media print to prevent @media print resets from dropping inherited custom
-  // properties.
   watchEffect(() => {
     if (typeof document === 'undefined') return
-
     const styleId = 'resume-theme-vars'
     let styleTag = document.getElementById(styleId)
-    if (!styleTag) {
-      styleTag = document.createElement('style')
-      styleTag.id = styleId
-      document.head.appendChild(styleTag)
-    }
-
-    const declarations = Object.entries(brandStyle.value)
-      .map(([key, value]) => `${key}: ${value};`)
-      .join('\n    ')
-
-    styleTag.textContent = `
-:root {
-    ${declarations}
-}
-
-@media print {
-  :root {
-    ${declarations}
-  }
-}
-    `.trim()
+    if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = styleId; document.head.appendChild(styleTag) }
+    const declarations = Object.entries(brandStyle.value).map(([key, value]) => `${key}: ${value};`).join('\n    ')
+    styleTag.textContent = `:root {\n    ${declarations}\n}\n@media print { :root {\n    ${declarations}\n  } }`
   })
 
+  restorePanelsState()
+  bootstrapResumeAssets()
+
   return {
-    resume,
-    panels,
-    photoUploadMessage,
-    photoUploadError,
-    educationLogoFeedback,
-    jsonStatusMessage,
-    jsonErrorMessage,
-    actionStatusMessage,
-    actionErrorMessage,
-    exportWarningMessage,
-    jsonInputRef,
-    pageOverflow,
-    pageHeight,
-    storageBackend,
-    brandStyle,
-    togglePanel,
-    expandAllPanels,
-    collapseAllPanels,
-    loadDemo,
-    clearAll,
-    saveDraft,
-    restoreDraft,
-    exportPdf,
-    exportJson,
-    triggerJsonImport,
-    handleJsonImport,
-    addEducation,
-    removeEducation,
-    toggleEducationHidden,
-    moveEducationUp,
-    moveEducationDown,
-    onEducationLogoChange,
-    removeEducationLogo,
-    addInternship,
-    removeInternship,
-    toggleInternshipHidden,
-    moveInternshipUp,
-    moveInternshipDown,
-    onLogoChange,
-    removeLogo,
-    addResearchExperience,
-    removeResearchExperience,
-    toggleResearchExperienceHidden,
-    moveResearchExperienceUp,
-    moveResearchExperienceDown,
-    addProject,
-    removeProject,
-    toggleProjectHidden,
-    moveProjectUp,
-    moveProjectDown,
-    addStudentExperience,
-    removeStudentExperience,
-    toggleStudentExperienceHidden,
-    moveStudentExperienceUp,
-    moveStudentExperienceDown,
-    addCustomImage,
-    removeCustomImage,
-    toggleCustomImageHidden,
-    moveCustomImageUp,
-    moveCustomImageDown,
-    addAward,
-    removeAward,
-    toggleAwardHidden,
-    moveAwardUp,
-    moveAwardDown,
-    addCertificate,
-    removeCertificate,
-    toggleCertificateHidden,
-    moveCertificateUp,
-    moveCertificateDown,
-    updateLayoutOrder,
-    onPhotoChange,
-    removePhoto,
-    onCustomImageChange,
-    removeCustomImageFile,
-    onPageOverflowChange,
+    resume, resumeAssets, currentAssetId, currentResumeAsset, assetsLoading, panels,
+    photoUploadMessage, photoUploadError, educationLogoFeedback, jsonStatusMessage, jsonErrorMessage,
+    actionStatusMessage, actionErrorMessage, exportWarningMessage, jsonInputRef, pageOverflow, pageHeight,
+    storageBackend, brandStyle, togglePanel, expandAllPanels, collapseAllPanels, loadDemo, clearAll,
+    saveDraft, restoreDraft, exportPdf, exportJson, triggerJsonImport, handleJsonImport,
+    createResumeAssetVersion, selectResumeAsset, duplicateResumeAsset, updateResumeAssetMetadata,
+    archiveResumeAsset, restoreResumeAsset, removeResumeAsset,
+    addEducation, removeEducation, toggleEducationHidden, moveEducationUp, moveEducationDown,
+    onEducationLogoChange, removeEducationLogo, addInternship, removeInternship, toggleInternshipHidden,
+    moveInternshipUp, moveInternshipDown, onLogoChange, removeLogo, addResearchExperience,
+    removeResearchExperience, toggleResearchExperienceHidden, moveResearchExperienceUp, moveResearchExperienceDown,
+    addProject, removeProject, toggleProjectHidden, moveProjectUp, moveProjectDown, addStudentExperience,
+    removeStudentExperience, toggleStudentExperienceHidden, moveStudentExperienceUp, moveStudentExperienceDown,
+    addCustomImage, removeCustomImage, toggleCustomImageHidden, moveCustomImageUp, moveCustomImageDown,
+    addAward, removeAward, toggleAwardHidden, moveAwardUp, moveAwardDown, addCertificate, removeCertificate,
+    toggleCertificateHidden, moveCertificateUp, moveCertificateDown, updateLayoutOrder, onPhotoChange, removePhoto,
+    onCustomImageChange, removeCustomImageFile, onPageOverflowChange,
   }
 }

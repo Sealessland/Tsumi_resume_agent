@@ -261,7 +261,7 @@ const hasAnyVisibleSection = computed(
 </script>
 
 <template>
-  <section class="glass-card flex justify-center overflow-x-auto p-2 sm:p-4 lg:p-5">
+  <section class="resume-preview-shell flex justify-center overflow-x-auto p-2 sm:p-3 lg:p-4">
     <article id="resume-preview-page" ref="pageRef" class="resume-page resume-page--editorial">
       <div class="resume-flow">
         <header v-if="showHeader" class="resume-head resume-head--plain">

@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 import Draggable from 'vuedraggable'
 import { ColorPicker, Slider } from 'tdesign-vue-next'
 import { BrowseIcon, BrowseOffIcon } from 'tdesign-icons-vue-next'
@@ -215,6 +215,24 @@ const photoConfig = computed(() => props.resume.theme.photoConfig)
 const sliderInputProps = {
   theme: 'column',
   size: 'small',
+}
+const unifiedLineHeightFields = [
+  'skillsLineHeight',
+  'internshipSummaryLineHeight',
+  'internshipHighlightsLineHeight',
+  'projectSummaryLineHeight',
+  'projectHighlightsLineHeight',
+  'awardDescriptionLineHeight',
+  'certificateDescriptionLineHeight',
+  'selfSummaryLineHeight',
+]
+const unifiedLineHeight = computed(() => clampLineHeight(props.resume.theme.skillsLineHeight))
+
+function updateUnifiedLineHeight(value) {
+  const next = clampLineHeight(value)
+  unifiedLineHeightFields.forEach((field) => {
+    props.resume.theme[field] = next
+  })
 }
 const orderableSections = computed({
   get() {
@@ -450,10 +468,25 @@ function movePersonalDetail(index, offset) {
   const [target] = list.splice(index, 1)
   list.splice(nextIndex, 0, target)
 }
+
+const experiencePages = reactive({
+  internship: 0,
+  research: 0,
+  project: 0,
+  student: 0,
+})
+
+function getPageIndex(type, length) {
+  return Math.min(experiencePages[type], Math.max(0, length - 1))
+}
+
+function changePage(type, delta, length) {
+  experiencePages[type] = Math.min(Math.max(0, getPageIndex(type, length) + delta), Math.max(0, length - 1))
+}
 </script>
 
 <template>
-  <aside class="no-print flex flex-col gap-4 xl:sticky xl:top-5 xl:h-[calc(100vh-5rem)] xl:overflow-auto">
+  <aside class="resume-editor no-print flex flex-col gap-3 xl:sticky xl:top-5 xl:h-[calc(100vh-5rem)] xl:overflow-auto">
     <article class="panel-card" :style="{ order: 100 }">
       <div class="panel-head">
         <button type="button" class="panel-head-main" @click="$emit('toggle-panel', 'layout')">
@@ -882,19 +915,6 @@ function movePersonalDetail(index, offset) {
             />
           </div>
         </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <label class="field-label mb-2 block">正文行距</label>
-          <div class="setting-slider">
-            <Slider
-              :model-value="resume.theme.skillsLineHeight"
-              :min="lineHeightMin"
-              :max="lineHeightMax"
-              :step="lineHeightStep"
-              :input-number-props="sliderInputProps"
-              @update:model-value="resume.theme.skillsLineHeight = clampLineHeight($event)"
-            />
-          </div>
-        </div>
         <label class="field-wrap">
           <span class="field-label">技能内容（支持 **加粗**）</span>
           <textarea v-model="resume.skills" v-auto-resize class="field-input field-textarea"></textarea>
@@ -902,7 +922,7 @@ function movePersonalDetail(index, offset) {
       </div>
     </article>
 
-    <article class="panel-card" :style="{ order: getEditorSectionOrder('internships') }">
+    <article class="panel-card experience-panel" :style="{ order: getEditorSectionOrder('internships') }">
       <div class="panel-head">
         <button type="button" class="panel-head-main" @click="$emit('toggle-panel', 'internship')">
           <span class="panel-caret">{{ panels.internship ? '▾' : '▸' }}</span>
@@ -983,19 +1003,6 @@ function movePersonalDetail(index, offset) {
               />
             </div>
           </div>
-            <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-            <label class="field-label mb-2 block">简介行距</label>
-            <div class="setting-slider">
-              <Slider
-                :model-value="resume.theme.internshipSummaryLineHeight"
-                :min="lineHeightMin"
-                :max="lineHeightMax"
-                :step="lineHeightStep"
-                :input-number-props="sliderInputProps"
-                @update:model-value="resume.theme.internshipSummaryLineHeight = clampLineHeight($event)"
-              />
-            </div>
-          </div>
           <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
             <label class="field-label mb-2 block">亮点字号</label>
             <div class="setting-slider">
@@ -1009,19 +1016,6 @@ function movePersonalDetail(index, offset) {
               />
             </div>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-            <label class="field-label mb-2 block">亮点行距</label>
-            <div class="setting-slider">
-              <Slider
-                :model-value="resume.theme.internshipHighlightsLineHeight"
-                :min="lineHeightMin"
-                :max="lineHeightMax"
-                :step="lineHeightStep"
-                :input-number-props="sliderInputProps"
-                @update:model-value="resume.theme.internshipHighlightsLineHeight = clampLineHeight($event)"
-              />
-            </div>
-          </div>
         </div>
         <div
           v-if="!resume.internships.length"
@@ -1029,8 +1023,13 @@ function movePersonalDetail(index, offset) {
         >
           暂无实习经历，点击下方按钮新增。
         </div>
+        <div v-if="resume.internships.length > 1" class="experience-pager">
+          <button type="button" class="small-btn" :disabled="getPageIndex('internship', resume.internships.length) === 0" @click="changePage('internship', -1, resume.internships.length)">← 上一项</button>
+          <span>实习 {{ getPageIndex('internship', resume.internships.length) + 1 }} / {{ resume.internships.length }}</span>
+          <button type="button" class="small-btn" :disabled="getPageIndex('internship', resume.internships.length) === resume.internships.length - 1" @click="changePage('internship', 1, resume.internships.length)">下一项 →</button>
+        </div>
         <draggable
-          v-else
+          v-if="resume.internships.length"
           v-model="resume.internships"
           item-key="id"
           handle=".drag-handle"
@@ -1041,7 +1040,7 @@ function movePersonalDetail(index, offset) {
           :animation="180"
         >
           <template #item="{ element: item, index }">
-            <article class="sub-card drag-item">
+            <article v-show="index === getPageIndex('internship', resume.internships.length)" class="sub-card drag-item experience-page">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <button type="button" class="drag-handle" title="拖拽排序">::</button>
@@ -1166,7 +1165,7 @@ function movePersonalDetail(index, offset) {
       </div>
     </article>
 
-    <article class="panel-card" :style="{ order: getEditorSectionOrder('researchExperiences') }">
+    <article class="panel-card experience-panel" :style="{ order: getEditorSectionOrder('researchExperiences') }">
       <div class="panel-head">
         <button type="button" class="panel-head-main" @click="$emit('toggle-panel', 'research')">
           <span class="panel-caret">{{ panels.research ? '▾' : '▸' }}</span>
@@ -1199,8 +1198,13 @@ function movePersonalDetail(index, offset) {
         >
           暂无科研经历，点击下方按钮新增。
         </div>
+        <div v-if="resume.researchExperiences.length > 1" class="experience-pager">
+          <button type="button" class="small-btn" :disabled="getPageIndex('research', resume.researchExperiences.length) === 0" @click="changePage('research', -1, resume.researchExperiences.length)">← 上一项</button>
+          <span>科研 {{ getPageIndex('research', resume.researchExperiences.length) + 1 }} / {{ resume.researchExperiences.length }}</span>
+          <button type="button" class="small-btn" :disabled="getPageIndex('research', resume.researchExperiences.length) === resume.researchExperiences.length - 1" @click="changePage('research', 1, resume.researchExperiences.length)">下一项 →</button>
+        </div>
         <draggable
-          v-else
+          v-if="resume.researchExperiences.length"
           v-model="resume.researchExperiences"
           item-key="id"
           handle=".drag-handle"
@@ -1211,7 +1215,7 @@ function movePersonalDetail(index, offset) {
           :animation="180"
         >
           <template #item="{ element: item, index }">
-            <article class="sub-card drag-item">
+            <article v-show="index === getPageIndex('research', resume.researchExperiences.length)" class="sub-card drag-item experience-page">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <button type="button" class="drag-handle" title="拖拽排序">::</button>
@@ -1330,7 +1334,7 @@ function movePersonalDetail(index, offset) {
       </div>
     </article>
 
-    <article class="panel-card" :style="{ order: getEditorSectionOrder('projects') }">
+    <article class="panel-card experience-panel" :style="{ order: getEditorSectionOrder('projects') }">
       <div class="panel-head">
         <button type="button" class="panel-head-main" @click="$emit('toggle-panel', 'project')">
           <span class="panel-caret">{{ panels.project ? '▾' : '▸' }}</span>
@@ -1410,19 +1414,6 @@ function movePersonalDetail(index, offset) {
               />
             </div>
           </div>
-            <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-            <label class="field-label mb-2 block">简介行距</label>
-            <div class="setting-slider">
-              <Slider
-                :model-value="resume.theme.projectSummaryLineHeight"
-                :min="lineHeightMin"
-                :max="lineHeightMax"
-                :step="lineHeightStep"
-                :input-number-props="sliderInputProps"
-                @update:model-value="resume.theme.projectSummaryLineHeight = clampLineHeight($event)"
-              />
-            </div>
-          </div>
           <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
             <label class="field-label mb-2 block">亮点字号</label>
             <div class="setting-slider">
@@ -1436,19 +1427,6 @@ function movePersonalDetail(index, offset) {
               />
             </div>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-            <label class="field-label mb-2 block">亮点行距</label>
-            <div class="setting-slider">
-              <Slider
-                :model-value="resume.theme.projectHighlightsLineHeight"
-                :min="lineHeightMin"
-                :max="lineHeightMax"
-                :step="lineHeightStep"
-                :input-number-props="sliderInputProps"
-                @update:model-value="resume.theme.projectHighlightsLineHeight = clampLineHeight($event)"
-              />
-            </div>
-          </div>
         </div>
         <div
           v-if="!resume.projects.length"
@@ -1456,8 +1434,13 @@ function movePersonalDetail(index, offset) {
         >
           暂无项目经历，点击下方按钮新增。
         </div>
+        <div v-if="resume.projects.length > 1" class="experience-pager">
+          <button type="button" class="small-btn" :disabled="getPageIndex('project', resume.projects.length) === 0" @click="changePage('project', -1, resume.projects.length)">← 上一项</button>
+          <span>项目 {{ getPageIndex('project', resume.projects.length) + 1 }} / {{ resume.projects.length }}</span>
+          <button type="button" class="small-btn" :disabled="getPageIndex('project', resume.projects.length) === resume.projects.length - 1" @click="changePage('project', 1, resume.projects.length)">下一项 →</button>
+        </div>
         <draggable
-          v-else
+          v-if="resume.projects.length"
           v-model="resume.projects"
           item-key="id"
           handle=".drag-handle"
@@ -1468,7 +1451,7 @@ function movePersonalDetail(index, offset) {
           :animation="180"
         >
           <template #item="{ element: item, index }">
-            <article class="sub-card drag-item">
+            <article v-show="index === getPageIndex('project', resume.projects.length)" class="sub-card drag-item experience-page">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <button type="button" class="drag-handle" title="拖拽排序">::</button>
@@ -1554,7 +1537,7 @@ function movePersonalDetail(index, offset) {
       </div>
     </article>
 
-    <article class="panel-card" :style="{ order: getEditorSectionOrder('studentExperiences') }">
+    <article class="panel-card experience-panel" :style="{ order: getEditorSectionOrder('studentExperiences') }">
       <div class="panel-head">
         <button type="button" class="panel-head-main" @click="$emit('toggle-panel', 'student')">
           <span class="panel-caret">{{ panels.student ? '▾' : '▸' }}</span>
@@ -1641,19 +1624,23 @@ function movePersonalDetail(index, offset) {
         >
           暂无学生经历，点击下方按钮新增。
         </div>
+        <div v-if="resume.studentExperiences.length > 1" class="experience-pager">
+          <button type="button" class="small-btn" :disabled="getPageIndex('student', resume.studentExperiences.length) === 0" @click="changePage('student', -1, resume.studentExperiences.length)">← 上一项</button>
+          <span>学生 {{ getPageIndex('student', resume.studentExperiences.length) + 1 }} / {{ resume.studentExperiences.length }}</span>
+          <button type="button" class="small-btn" :disabled="getPageIndex('student', resume.studentExperiences.length) === resume.studentExperiences.length - 1" @click="changePage('student', 1, resume.studentExperiences.length)">下一项 →</button>
+        </div>
         <draggable
-          v-else
+          v-if="resume.studentExperiences.length"
           v-model="resume.studentExperiences"
           item-key="id"
           handle=".drag-handle"
           class="drag-list"
           ghost-class="drag-ghost"
-          chosen-class="drag-chosen"
           drag-class="drag-dragging"
           :animation="180"
         >
           <template #item="{ element: item, index }">
-            <article class="sub-card drag-item">
+            <article v-show="index === getPageIndex('student', resume.studentExperiences.length)" class="sub-card drag-item experience-page">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <button type="button" class="drag-handle" title="拖拽排序">::</button>
@@ -1932,19 +1919,6 @@ function movePersonalDetail(index, offset) {
             />
           </div>
         </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <label class="field-label mb-2 block">描述行距</label>
-          <div class="setting-slider">
-            <Slider
-              :model-value="resume.theme.awardDescriptionLineHeight"
-              :min="lineHeightMin"
-              :max="lineHeightMax"
-              :step="lineHeightStep"
-              :input-number-props="sliderInputProps"
-              @update:model-value="resume.theme.awardDescriptionLineHeight = clampLineHeight($event)"
-            />
-          </div>
-        </div>
         <div
           v-if="!resume.awards.length"
           class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600"
@@ -2093,19 +2067,6 @@ function movePersonalDetail(index, offset) {
             />
           </div>
         </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <label class="field-label mb-2 block">描述行距</label>
-          <div class="setting-slider">
-            <Slider
-              :model-value="resume.theme.certificateDescriptionLineHeight"
-              :min="lineHeightMin"
-              :max="lineHeightMax"
-              :step="lineHeightStep"
-              :input-number-props="sliderInputProps"
-              @update:model-value="resume.theme.certificateDescriptionLineHeight = clampLineHeight($event)"
-            />
-          </div>
-        </div>
         <div
           v-if="!resume.certificates.length"
           class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600"
@@ -2230,19 +2191,6 @@ function movePersonalDetail(index, offset) {
             />
           </div>
         </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <label class="field-label mb-2 block">正文行距</label>
-          <div class="setting-slider">
-            <Slider
-              :model-value="resume.theme.selfSummaryLineHeight"
-              :min="lineHeightMin"
-              :max="lineHeightMax"
-              :step="lineHeightStep"
-              :input-number-props="sliderInputProps"
-              @update:model-value="resume.theme.selfSummaryLineHeight = clampLineHeight($event)"
-            />
-          </div>
-        </div>
         <label class="field-wrap">
           <span class="field-label">内容</span>
           <textarea v-model="resume.selfSummary.content" v-auto-resize class="field-input field-textarea"></textarea>
@@ -2303,6 +2251,23 @@ function movePersonalDetail(index, offset) {
               @change="onSchoolFontSizeChange"
             />
           </div>
+        </div>
+        <div class="rounded-xl border border-sky-200 bg-sky-50/60 px-3 py-3">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <label class="field-label">统一正文行距</label>
+            <span class="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-sky-700">全局</span>
+          </div>
+          <div class="setting-slider">
+            <Slider
+              :model-value="unifiedLineHeight"
+              :min="lineHeightMin"
+              :max="lineHeightMax"
+              :step="lineHeightStep"
+              :input-number-props="sliderInputProps"
+              @update:model-value="updateUnifiedLineHeight"
+            />
+          </div>
+          <p class="mt-2 text-xs leading-5 text-slate-500">同步控制技能、实习、项目、荣誉、证书和自我评价的正文行距。</p>
         </div>
         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
           <label class="field-label mb-2 block">模块间距</label>

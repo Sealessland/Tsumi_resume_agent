@@ -46,13 +46,29 @@ public final class DashScopeJdAnalyst implements StructuredJdAnalyst {
                 SCHEMA,
                 model,
                 0.0);
-        for (var requirement : matrix.requirements()) {
-            if (requirement.sourceEnd() > jobDescription.length()
-                    || !jobDescription.substring(requirement.sourceStart(), requirement.sourceEnd())
-                            .equals(requirement.sourceText())) {
-                throw new ModelOutputRejectedException("jd_analyst", "source span does not match JD text");
-            }
+        var normalized = matrix.requirements().stream()
+                .map(requirement -> normalizeSourceSpan(jobDescription, requirement))
+                .toList();
+        return new CapabilityMatrix(normalized);
+    }
+
+    private CapabilityRequirement normalizeSourceSpan(
+            String jobDescription,
+            CapabilityRequirement requirement) {
+        if (requirement.sourceEnd() <= jobDescription.length()
+                && jobDescription.substring(requirement.sourceStart(), requirement.sourceEnd())
+                        .equals(requirement.sourceText())) {
+            return requirement;
         }
-        return matrix;
+        var sourceStart = jobDescription.indexOf(requirement.sourceText());
+        if (sourceStart < 0) {
+            throw new ModelOutputRejectedException("jd_analyst", "source text does not occur in JD");
+        }
+        return new CapabilityRequirement(
+                requirement.requirementId(),
+                requirement.capability(),
+                requirement.sourceText(),
+                sourceStart,
+                sourceStart + requirement.sourceText().length());
     }
 }

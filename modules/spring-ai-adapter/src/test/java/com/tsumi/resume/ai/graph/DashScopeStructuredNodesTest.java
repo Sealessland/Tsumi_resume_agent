@@ -3,8 +3,6 @@ package com.tsumi.resume.ai.graph;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tsumi.resume.domain.evidence.EvidenceArtifact;
 import com.tsumi.resume.workflow.WorkflowInput;
@@ -24,8 +22,10 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.ResponseFormat;
 
-class DashScopeStructuredNodesTest {
+class OpenAiStructuredNodesTest {
 
     @Test
     void analystUsesVersionedStrictJsonSchemaAndDeterministicOptions() {
@@ -36,19 +36,35 @@ class DashScopeStructuredNodesTest {
         var client = new DashScopeStructuredModelClient(
                 model, new ObjectMapper(), Duration.ofSeconds(1), 1_000);
 
-        var matrix = new DashScopeJdAnalyst(client, "qwen-plus").analyze("需要 Spring Boot 经验");
+        var matrix = new DashScopeJdAnalyst(client, "qwen3.7-plus").analyze("需要 Spring Boot 经验");
 
         assertThat(matrix.requirements()).hasSize(1);
         assertThat(matrix.requirements().getFirst().sourceText()).isEqualTo("Spring Boot");
         var prompt = model.prompts.getFirst();
         assertThat(prompt.getSystemMessage().getText()).contains("jd-analyst/v1", "不得补充 JD 中不存在的要求");
-        var options = (DashScopeChatOptions) prompt.getOptions();
-        assertThat(options.getModel()).isEqualTo("qwen-plus");
+        var options = (OpenAiChatOptions) prompt.getOptions();
+        assertThat(options.getModel()).isEqualTo("qwen3.7-plus");
         assertThat(options.getTemperature()).isZero();
-        assertThat(options.getMaxInputTokens()).isEqualTo(12_000);
         assertThat(options.getMaxTokens()).isEqualTo(1_000);
-        assertThat(options.getResponseFormat().getType()).isEqualTo(DashScopeResponseFormat.Type.JSON_SCHEMA);
-        assertThat(options.getResponseFormat().getJsonScheme().getStrict()).isTrue();
+        assertThat(options.getResponseFormat().getType()).isEqualTo(ResponseFormat.Type.JSON_SCHEMA);
+        assertThat(options.getResponseFormat().getJsonSchema().getStrict()).isTrue();
+    }
+
+    @Test
+    void analystRecomputesSourceOffsetsFromVerbatimTextForCompatibleModels() {
+        var model = new RecordingChatModel("""
+                {"requirements":[{"requirementId":"jd_01","capability":"Spring Boot",
+                "sourceText":"Spring Boot","sourceStart":0,"sourceEnd":1}]}
+                """);
+        var client = new DashScopeStructuredModelClient(
+                model, new ObjectMapper(), Duration.ofSeconds(1), 1_000);
+
+        var matrix = new DashScopeJdAnalyst(client, "qwen3.7-plus").analyze("需要 Spring Boot 经验");
+
+        assertThat(matrix.requirements()).singleElement().satisfies(requirement -> {
+            assertThat(requirement.sourceStart()).isEqualTo(3);
+            assertThat(requirement.sourceEnd()).isEqualTo(14);
+        });
     }
 
     @Test
@@ -59,7 +75,7 @@ class DashScopeStructuredNodesTest {
         var client = new DashScopeStructuredModelClient(
                 model, new ObjectMapper(), Duration.ofSeconds(1), 1_000);
 
-        assertThatThrownBy(() -> new DashScopeJdAnalyst(client, "qwen-plus").analyze("Java"))
+        assertThatThrownBy(() -> new DashScopeJdAnalyst(client, "qwen3.7-plus").analyze("Java"))
                 .isInstanceOf(ModelOutputRejectedException.class)
                 .isInstanceOf(WorkflowExecutionException.class)
                 .hasMessageContaining("jd_analyst");
@@ -83,7 +99,7 @@ class DashScopeStructuredNodesTest {
         var client = new DashScopeStructuredModelClient(
                 model, new ObjectMapper(), Duration.ofSeconds(1), 1_000);
         var rewriter = new DashScopeResumeRewriter(
-                client, store, Clock.fixed(now, ZoneOffset.UTC), "qwen-plus", () -> "patch_server_01");
+                client, store, Clock.fixed(now, ZoneOffset.UTC), "qwen3.7-plus", () -> "patch_server_01");
         var content = (com.fasterxml.jackson.databind.node.ObjectNode) new ObjectMapper().readTree("""
                 {"schemaVersion":13,"resumeId":"resume_01","version":1,
                 "basics":{"summary":"负责后端开发"}}
@@ -104,7 +120,7 @@ class DashScopeStructuredNodesTest {
         assertThat(model.prompts.getFirst().getUserMessage().getText())
                 .contains("evidence_01", "项目使用 Spring Boot")
                 .doesNotContain("evidence_02", "过期材料");
-        assertThat(((DashScopeChatOptions) model.prompts.getFirst().getOptions()).getTemperature())
+        assertThat(((OpenAiChatOptions) model.prompts.getFirst().getOptions()).getTemperature())
                 .isEqualTo(0.2);
     }
 
@@ -118,7 +134,7 @@ class DashScopeStructuredNodesTest {
         var client = new DashScopeStructuredModelClient(
                 unavailable, new ObjectMapper(), Duration.ofSeconds(1), 1_000);
 
-        assertThatThrownBy(() -> new DashScopeJdAnalyst(client, "qwen-plus").analyze("Java"))
+        assertThatThrownBy(() -> new DashScopeJdAnalyst(client, "qwen3.7-plus").analyze("Java"))
                 .isInstanceOf(WorkflowExecutionException.class)
                 .satisfies(error -> {
                     var controlled = (WorkflowExecutionException) error;

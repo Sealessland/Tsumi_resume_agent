@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:./config/ai-secrets.properties
   datasource:
     url: jdbc:h2:file:./.data/tsumi-resume-ai;MODE=PostgreSQL;AUTO_SERVER=TRUE
     username: sa
@@ -11,16 +13,17 @@ spring:
     hibernate:
       ddl-auto: validate
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+    openai:
+      base-url: ${TSUMI_AI_BASE_URL:${tsumi.ai.base-url}}
+      api-key: ${TSUMI_AI_API_KEY:${tsumi.ai.api-key}}
       chat:
         options:
-          model: qwen-plus
+          model: ${TSUMI_AI_MODEL:${tsumi.ai.model}}
 
 tsumi:
   ai:
-    node-timeout: 30s
+    node-timeout: ${TSUMI_AI_NODE_TIMEOUT:90s}
     max-output-tokens: 2000
-    analyst-model: qwen-plus
-    rewrite-model: qwen-plus
-    guard-model: qwen-plus
+    analyst-model: ${TSUMI_AI_ANALYST_MODEL:${TSUMI_AI_MODEL:${tsumi.ai.model}}}
+    rewrite-model: ${TSUMI_AI_REWRITE_MODEL:${TSUMI_AI_MODEL:${tsumi.ai.model}}}
+    guard-model: ${TSUMI_AI_GUARD_MODEL:${TSUMI_AI_MODEL:${tsumi.ai.model}}}
